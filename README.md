@@ -285,13 +285,16 @@ python bot.py
    - **Name:** например `meal-fit-ai` или `fitmeal-bot`.
    - **Region:** выбери ближайший (например Frankfurt).
    - **Branch:** `main` (или твоя ветка по умолчанию).
-   - **Runtime:** `Python 3`.
-   - **Build Command:** `pip install -r requirements.txt`
+   - **Runtime:** `Python 3`. В корне репо должен быть файл **`.python-version`** с содержимым `3.12` — тогда Render возьмёт Python 3.12 и сборка `pydantic-core` (зависимость aiogram) пройдёт по готовым wheel’ам. Если сборка всё равно падает, в **Environment** добавь переменную `PYTHON_VERSION` = `3.12.2`.
+   - **Build Command:** `pip install --upgrade pip && pip install -r requirements.txt`
    - **Start Command:** `python keep_alive.py`  
      (именно так: один процесс с HTTP-сервером и ботом внутри.)
-5. **Environment:** добавь переменные (переключатель **Environment Variables**):
-   - `BOT_TOKEN` — токен от [@BotFather](https://t.me/BotFather).
-   - `GEMINI_API_KEY` — ключ Google AI Studio (для распознавания еды и расчёта целей).
+5. **Environment (обязательно):** на сервере переменные задаются в панели Render, файл `.env` на сервер не заливается (он в `.gitignore`). В карточке сервиса открой вкладку **Environment** и добавь:
+   | Key | Value | Где взять |
+   |-----|--------|-----------|
+   | `BOT_TOKEN` | твой токен бота | [@BotFather](https://t.me/BotFather) → /newbot или /mybots → API Token |
+   | `GEMINI_API_KEY` | твой ключ API | [Google AI Studio](https://aistudio.google.com/apikey) → Get API key |
+   Без этих переменных бот на Render не запустится (BOT_TOKEN обязателен) или будет без распознавания еды и ИИ-расчётов (если нет GEMINI_API_KEY). После добавления или изменения переменных при необходимости нажми **Manual Deploy** → **Deploy latest commit**, чтобы сервис перезапустился с новыми значениями.
 6. Нажми **Create Web Service**. Render соберёт проект и запустит сервис. В логах должно быть что-то вроде: `Keep-alive HTTP on 0.0.0.0:10000` и запуск бота.
 
 После деплоя Render даст URL вида:  
