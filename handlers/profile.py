@@ -37,6 +37,7 @@ GOAL_LABELS = {
     "gain": "📈 Набрать массу",
     "maintain": "⚖️ Поддерживать",
     "cutting": "🔥 Сушка",
+    "recomp": "🔄 Рекомпозиция",
 }
 
 ACTIVITY_LABELS = {
@@ -89,6 +90,7 @@ def goal_keyboard():
         [InlineKeyboardButton(text="📉 Похудеть", callback_data="goal_loss")],
         [InlineKeyboardButton(text="📈 Набрать массу", callback_data="goal_gain")],
         [InlineKeyboardButton(text="⚖️ Поддерживать", callback_data="goal_maintain")],
+        [InlineKeyboardButton(text="🔄 Рекомпозиция", callback_data="goal_recomp")],
         [InlineKeyboardButton(text="🔥 Сушка", callback_data="goal_cutting")],
         [InlineKeyboardButton(text="✏️ Написать своё", callback_data="goal_custom")],
     ])
@@ -496,7 +498,7 @@ async def get_target_weight(message: Message, state: FSMContext):
             comment = result.get("comment", "")
             nuances = result.get("nuances", "")
         else:
-            goal_key = data["goal"] if data["goal"] in ["loss", "gain", "maintain", "cutting"] else "maintain"
+            goal_key = data["goal"] if data["goal"] in ["loss", "gain", "maintain", "cutting", "recomp"] else "maintain"
             cal, prot, fat, carbs = calculate_goals(
                 data["weight"], data["height"], data["age"],
                 data["gender"], data["lifestyle"], goal_key
@@ -572,7 +574,7 @@ async def save_weight(message: Message, state: FSMContext):
         # Пересчёт целей КБЖУ и воды с учётом нового веса
         if user and user.get("height") and user.get("calories_goal") is not None:
             goal = user.get("goal") or "maintain"
-            goal_key = goal if goal in ("loss", "gain", "maintain", "cutting") else "maintain"
+            goal_key = goal if goal in ("loss", "gain", "maintain", "cutting", "recomp") else "maintain"
             pace = user.get("pace") or "slow"
             result = calculate_goals_ai(
                 weight=weight,

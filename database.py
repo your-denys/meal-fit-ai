@@ -215,6 +215,16 @@ def delete_last_meal(user_id):
     conn.close()
     return False
 
+def delete_meal_by_id(meal_id, user_id):
+    """Удаляет приём пищи по id, только если он принадлежит user_id."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("DELETE FROM meals WHERE id=? AND user_id=?", (meal_id, user_id))
+    deleted = c.rowcount > 0
+    conn.commit()
+    conn.close()
+    return deleted
+
 def get_daily_totals(user_id, target_date=None):
     conn = get_conn()
     c = conn.cursor()

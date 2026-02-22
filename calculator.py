@@ -17,11 +17,13 @@ def calculate_goals(weight, height, age, gender, activity, goal):
         calories = tdee - 400
     elif goal == "gain":
         calories = tdee + 300
+    elif goal == "recomp":
+        calories = tdee  # поддержание калорий, высокий белок — в формуле ниже
     else:
         calories = tdee
 
     calories = round(calories)
-    protein = round(weight * 1.8)       # 1.8g per kg
+    protein = round(weight * 2.0) if goal == "recomp" else round(weight * 1.8)  # рекомпозиция: выше белок
     fat = round(calories * 0.25 / 9)    # 25% of calories
     carbs = round((calories - protein * 4 - fat * 9) / 4)
 
@@ -35,7 +37,7 @@ def calculate_water_goal(weight_kg: float, goal: str, pace: str, carbs_g: float 
     pace: slow = мягкая, fast = агрессивная
     """
     soft = pace in ("slow", None, "")
-    if goal == "maintain":
+    if goal == "maintain" or goal == "recomp":
         base_ml_per_kg = 32.5   # 30–35
     elif goal == "loss":
         base_ml_per_kg = 35 if soft else 37.5   # 35 или 35–40

@@ -29,6 +29,7 @@ GOAL_LABELS = {
     "gain": "📈 Набрать массу",
     "maintain": "⚖️ Поддерживать",
     "cutting": "🔥 Сушка",
+    "recomp": "🔄 Рекомпозиция",
 }
 
 ACTIVITY_LABELS = {
@@ -167,7 +168,7 @@ async def get_target_weight(message: Message, state: FSMContext):
             carbs = result["carbs"]
             comment = result.get("comment", "")
         else:
-            goal_key = data["goal"] if data["goal"] in ["loss", "gain", "maintain", "cutting"] else "maintain"
+            goal_key = data["goal"] if data["goal"] in ["loss", "gain", "maintain", "cutting", "recomp"] else "maintain"
             cal, prot, fat, carbs = calculate_goals(
                 data["weight"], data["height"], data["age"],
                 data["gender"], data["activity"], goal_key

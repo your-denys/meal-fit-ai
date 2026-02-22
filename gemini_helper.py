@@ -61,6 +61,7 @@ def calculate_goals_ai(weight, height, age, gender, lifestyle, training_count, t
         "loss": "ПОХУДЕНИЕ. Дефицит калорий. Белок высокий (1.8-2.2 г/кг).",
         "gain": "НАБОР МАССЫ. Профицит калорий. Белок высокий (1.8-2.2 г/кг). Углеводы высокие.",
         "maintain": "ПОДДЕРЖАНИЕ. Калории = TDEE. Белок: если человек тренируется 3+ раз в неделю (особенно силово) — 1.8-2.2 г/кг; если нет тренировок — 1.4-1.6 г/кг. Учитывай улучшение композиции тела при желаемом весе близком к текущему.",
+        "recomp": "РЕКОМПОЗИЦИЯ. Калории на уровне TDEE (без дефицита и профицита). Белок высокий (1.8–2.2 г/кг) для сохранения/набора мышечной массы при сжигании жира. Углеводы и жиры умеренно. Цель — улучшение состава тела при стабильном весе.",
         "cutting": "СУШКА. Дефицит калорий. Белок высокий (2-2.5 г/кг). Углеводы ниже, жиры умеренно.",
     }
 
@@ -185,6 +186,7 @@ def get_daily_tip(totals: dict, user: dict) -> str | None:
         "loss": "похудение",
         "gain": "набор массы",
         "maintain": "поддержание",
+        "recomp": "рекомпозиция",
         "cutting": "сушка",
     }
 
@@ -201,6 +203,7 @@ def get_daily_tip(totals: dict, user: dict) -> str | None:
 - Если белка < 50% к вечеру — напомни добрать
 - Для сушки — следи за углеводами
 - Для набора — следи за калориями и белком
+- Для рекомпозиции — калории на уровне цели, белок в приоритете
 - Если всё хорошо — скажи коротко что всё идёт по плану
 - Только 1 предложение, без приветствий"""
 
@@ -235,6 +238,7 @@ def get_meal_suggestion(totals: dict, user: dict, meal_type: str, eaten_today: l
         "loss": "похудение",
         "gain": "набор массы",
         "maintain": "поддержание",
+        "recomp": "рекомпозиция",
         "cutting": "сушка",
     }
     meal_label = MEAL_TYPE_LABELS.get(meal_type, meal_type)
@@ -299,7 +303,7 @@ def get_reminder_suggestion(
     if cal_rem < 30 and prot_rem < 5 and carb_rem < 10:
         return None
 
-    goal_labels = {"loss": "похудение", "gain": "набор массы", "maintain": "поддержание", "cutting": "сушка"}
+    goal_labels = {"loss": "похудение", "gain": "набор массы", "maintain": "поддержание", "recomp": "рекомпозиция", "cutting": "сушка"}
     goal = goal_labels.get(user.get("goal", ""), user.get("goal", ""))
 
     time_context = ""
@@ -340,4 +344,26 @@ def get_reminder_suggestion(
         return response.text.strip()
     except Exception as e:
         print(f"Gemini reminder suggestion error: {e}")
+        return None
+
+
+def answer_user_question(context: str, user_message: str) -> str | None:
+    """Ответ ИИ на вопрос пользователя в контексте сообщения бота (напоминание, совет и т.д.)."""
+    if not context and not user_message:
+        return None
+    prompt = f"""Ты нутрициолог-ассистент в боте для учёта питания.
+
+Контекст (сообщение, которое бот только что отправил пользователю):
+{context or '(нет)'}
+
+Вопрос или реплика пользователя:
+{user_message}
+
+Дай краткий ответ по существу (1–4 предложения), без приветствий. Если вопрос не по питанию — ответь коротко и дружелюбно."""
+
+    try:
+        response = model.generate_content(prompt)
+        return response.text.strip()
+    except Exception as e:
+        print(f"Gemini answer_user_question error: {e}")
         return None

@@ -6,7 +6,7 @@ def main_keyboard():
             [KeyboardButton(text="📷 Добавить еду"), KeyboardButton(text="🍽 Сегодня")],
             [KeyboardButton(text="💡 Что съесть?"), KeyboardButton(text="⚡ Быстрое добавление")],
             [KeyboardButton(text="👤 Мой профиль"), KeyboardButton(text="📊 Статистика")],
-            [KeyboardButton(text="⚖️ Записать вес")],
+            [KeyboardButton(text="⚖️ Записать вес"), KeyboardButton(text="📖 Что я умею")],
         ],
         resize_keyboard=True
     )
@@ -71,6 +71,7 @@ def goal_keyboard():
         [InlineKeyboardButton(text="📉 Похудеть", callback_data="goal_loss")],
         [InlineKeyboardButton(text="📈 Набрать массу", callback_data="goal_gain")],
         [InlineKeyboardButton(text="⚖️ Поддерживать", callback_data="goal_maintain")],
+        [InlineKeyboardButton(text="🔄 Рекомпозиция", callback_data="goal_recomp")],
         [InlineKeyboardButton(text="🔥 Сушка", callback_data="goal_cutting")],
         [InlineKeyboardButton(text="✏️ Написать своё", callback_data="goal_custom")],
     ])
