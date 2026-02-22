@@ -46,22 +46,22 @@ async def run_reminders(bot):
     now = datetime.now()
     if now.hour < START_HOUR or now.hour >= CUTOFF_HOUR:
         return
-    for user_id in get_users_for_reminders():
+    for user_id in await get_users_for_reminders():
         try:
-            user = get_user(user_id)
+            user = await get_user(user_id)
             if not user:
                 continue
             if user.get("reminders_enabled") == 0:
                 continue
             per_day = user.get("reminders_per_day") or 3
-            if get_reminder_count_today(user_id) >= per_day:
+            if await get_reminder_count_today(user_id) >= per_day:
                 continue
-            last_sent = get_last_reminder_sent_at(user_id)
+            last_sent = await get_last_reminder_sent_at(user_id)
             if last_sent is not None:
                 mins_since = int((now - last_sent).total_seconds() / 60)
                 if mins_since < MIN_MINUTES_BETWEEN_REMINDERS:
                     continue
-            totals = get_daily_totals(user_id)
+            totals = await get_daily_totals(user_id)
             cal_goal = user.get("calories_goal") or 0
             prot_goal = user.get("protein_goal") or 0
             carb_goal = user.get("carbs_goal") or 0
@@ -72,10 +72,10 @@ async def run_reminders(bot):
             carb_rem = carb_goal - totals["carbs"]
             if cal_rem < MIN_SHORTFALL_CAL and prot_rem < MIN_SHORTFALL_PROT and carb_rem < MIN_SHORTFALL_CARB:
                 continue
-            meals_today = get_meals_today(user_id)
+            meals_today = await get_meals_today(user_id)
             eaten = [m[1] for m in meals_today]
 
-            last_meal = get_last_meal_today(user_id)
+            last_meal = await get_last_meal_today(user_id)
             last_meal_minutes_ago = None
             last_meal_name = None
             if last_meal:
@@ -100,7 +100,7 @@ async def run_reminders(bot):
             if not text:
                 continue
             await bot.send_message(user_id, "🔔 " + text)
-            log_reminder_sent(user_id)
+            await log_reminder_sent(user_id)
             logger.info("Reminder sent to user_id=%s", user_id)
         except Exception as e:
             logger.exception("Reminder for user_id=%s: %s", user_id, e)

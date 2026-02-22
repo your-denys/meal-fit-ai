@@ -1,10 +1,11 @@
 import asyncio
 import logging
 import sys
+import asyncpg
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
-from config import BOT_TOKEN, GEMINI_API_KEY
-from database import init_db
+from config import BOT_TOKEN, GEMINI_API_KEY, DATABASE_URL
+from database import init_db, set_pool
 from handlers import common, food, stats, profile, quick
 from reminders import reminder_loop
 
@@ -18,7 +19,9 @@ def check_config():
     """Проверка обязательных переменных перед запуском."""
     if not BOT_TOKEN or BOT_TOKEN.strip() == "":
         print("Ошибка: не задан BOT_TOKEN. Добавь его в файл .env")
-        print("Пример: BOT_TOKEN=123456:ABC-DEF...")
+        sys.exit(1)
+    if not DATABASE_URL or DATABASE_URL.strip() == "":
+        print("Ошибка: не задан DATABASE_URL. Добавь в .env строку подключения к PostgreSQL (Neon).")
         sys.exit(1)
     if not GEMINI_API_KEY or GEMINI_API_KEY.strip() == "":
         print("Предупреждение: GEMINI_API_KEY не задан. Распознавание по фото работать не будет.")
@@ -40,7 +43,9 @@ async def log_updates_middleware(handler, event, data):
 
 async def main():
     check_config()
-    init_db()
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5, command_timeout=60)
+    set_pool(pool)
+    await init_db(pool)
 
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher(storage=MemoryStorage())

@@ -1,98 +1,96 @@
-import sqlite3
-from datetime import date
+"""
+PostgreSQL (Neon) через asyncpg. Пул создаётся в bot.py и передаётся в set_pool().
+"""
+import asyncpg
+from datetime import date, datetime
 
-DB_PATH = "meal_fit.db"
+_pool: asyncpg.Pool | None = None
 
-def get_conn():
-    return sqlite3.connect(DB_PATH)
 
-def init_db():
-    conn = get_conn()
-    c = conn.cursor()
+def set_pool(pool: asyncpg.Pool):
+    global _pool
+    _pool = pool
 
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY,
-            name TEXT,
-            weight REAL,
-            height REAL,
-            age INTEGER,
-            gender TEXT,
-            activity TEXT,
-            goal TEXT,
-            target_weight REAL,
-            calories_goal INTEGER,
-            protein_goal INTEGER,
-            fat_goal INTEGER,
-            carbs_goal INTEGER,
-            water_goal INTEGER,
-            pace TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    try:
-        c.execute("ALTER TABLE users ADD COLUMN water_goal INTEGER")
-    except sqlite3.OperationalError:
-        pass
-    try:
-        c.execute("ALTER TABLE users ADD COLUMN pace TEXT")
-    except sqlite3.OperationalError:
-        pass
-    try:
-        c.execute("ALTER TABLE users ADD COLUMN reminders_enabled INTEGER DEFAULT 1")
-    except sqlite3.OperationalError:
-        pass
-    try:
-        c.execute("ALTER TABLE users ADD COLUMN reminders_per_day INTEGER DEFAULT 3")
-    except sqlite3.OperationalError:
-        pass
 
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS reminder_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            sent_at TEXT,
-            date TEXT
-        )
-    """)
+def _get_pool():
+    if _pool is None:
+        raise RuntimeError("Database pool not set. Call database.set_pool(pool) at startup.")
+    return _pool
 
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS meals (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            name TEXT,
-            calories INTEGER,
-            protein REAL,
-            fat REAL,
-            carbs REAL,
-            date TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
 
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS weight_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            weight REAL,
-            date TEXT
-        )
-    """)
+async def init_db(pool: asyncpg.Pool | None = None):
+    """Создать таблицы и опционально колонки. Вызывать с pool при старте бота."""
+    p = pool or _get_pool()
+    async with p.acquire() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id BIGINT PRIMARY KEY,
+                name TEXT,
+                weight REAL,
+                height REAL,
+                age INTEGER,
+                gender TEXT,
+                activity TEXT,
+                goal TEXT,
+                target_weight REAL,
+                calories_goal INTEGER,
+                protein_goal INTEGER,
+                fat_goal INTEGER,
+                carbs_goal INTEGER,
+                water_goal INTEGER,
+                pace TEXT,
+                reminders_enabled INTEGER DEFAULT 1,
+                reminders_per_day INTEGER DEFAULT 3,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        for col, typ in [("water_goal", "INTEGER"), ("pace", "TEXT")]:
+            try:
+                await conn.execute(f"ALTER TABLE users ADD COLUMN {col} {typ}")
+            except asyncpg.exceptions.DuplicateColumnError:
+                pass
 
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS quick_foods (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            name TEXT,
-            calories INTEGER,
-            protein REAL,
-            fat REAL,
-            carbs REAL
-        )
-    """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS reminder_log (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT,
+                sent_at TIMESTAMP,
+                date DATE
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS meals (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT,
+                name TEXT,
+                calories INTEGER,
+                protein REAL,
+                fat REAL,
+                carbs REAL,
+                date DATE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS weight_log (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT,
+                weight REAL,
+                date DATE
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS quick_foods (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT,
+                name TEXT,
+                calories INTEGER,
+                protein REAL,
+                fat REAL,
+                carbs REAL
+            )
+        """)
 
-    conn.commit()
-    conn.close()
 
 # --- Users ---
 
@@ -102,220 +100,196 @@ USER_KEYS = [
     "reminders_enabled", "reminders_per_day", "created_at"
 ]
 
-def get_user(user_id):
-    conn = get_conn()
-    c = conn.cursor()
-    sel = ", ".join(USER_KEYS)
-    c.execute(f"SELECT {sel} FROM users WHERE user_id = ?", (user_id,))
-    row = c.fetchone()
-    conn.close()
+
+async def get_user(user_id: int):
+    p = _get_pool()
+    async with p.acquire() as conn:
+        sel = ", ".join(USER_KEYS)
+        row = await conn.fetchrow(f"SELECT {sel} FROM users WHERE user_id = $1", user_id)
     if row:
-        return dict(zip(USER_KEYS, row))
+        return dict(row)
     return None
 
-def save_user(user_id, data: dict):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,))
-    exists = c.fetchone()
-    if exists:
-        sets = ", ".join(f"{k} = ?" for k in data.keys())
-        c.execute(f"UPDATE users SET {sets} WHERE user_id = ?", (*data.values(), user_id))
-    else:
-        data["user_id"] = user_id
-        keys = ", ".join(data.keys())
-        placeholders = ", ".join("?" * len(data))
-        c.execute(f"INSERT INTO users ({keys}) VALUES ({placeholders})", list(data.values()))
-    conn.commit()
-    conn.close()
+
+async def save_user(user_id: int, data: dict):
+    p = _get_pool()
+    async with p.acquire() as conn:
+        exists = await conn.fetchval("SELECT 1 FROM users WHERE user_id = $1", user_id)
+        if exists:
+            n = len(data)
+            sets = ", ".join(f"{k} = ${i+1}" for i, k in enumerate(data.keys()))
+            await conn.execute(f"UPDATE users SET {sets} WHERE user_id = ${n+1}", *data.values(), user_id)
+        else:
+            data = {**data, "user_id": user_id}
+            keys = ", ".join(data.keys())
+            placeholders = ", ".join(f"${i+1}" for i in range(len(data)))
+            await conn.execute(f"INSERT INTO users ({keys}) VALUES ({placeholders})", *data.values())
 
 
-def get_users_for_reminders():
-    """user_id списком для всех, у кого включены напоминания и заданы цели."""
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute(
-        "SELECT user_id FROM users WHERE (reminders_enabled IS NULL OR reminders_enabled = 1) AND calories_goal IS NOT NULL AND calories_goal > 0"
-    )
-    rows = c.fetchall()
-    conn.close()
-    return [r[0] for r in rows]
+async def get_users_for_reminders():
+    p = _get_pool()
+    async with p.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT user_id FROM users WHERE (reminders_enabled IS NULL OR reminders_enabled = 1) AND calories_goal IS NOT NULL AND calories_goal > 0"
+        )
+    return [r["user_id"] for r in rows]
 
 
-def log_reminder_sent(user_id):
-    from datetime import datetime
+async def log_reminder_sent(user_id: int):
+    p = _get_pool()
     now = datetime.now()
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute(
-        "INSERT INTO reminder_log (user_id, sent_at, date) VALUES (?, ?, ?)",
-        (user_id, now.isoformat(), now.date().isoformat())
-    )
-    conn.commit()
-    conn.close()
+    async with p.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO reminder_log (user_id, sent_at, date) VALUES ($1, $2, $3)",
+            user_id, now, now.date()
+        )
 
 
-def get_reminder_count_today(user_id):
-    today = date.today().isoformat()
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM reminder_log WHERE user_id = ? AND date = ?", (user_id, today))
-    n = c.fetchone()[0]
-    conn.close()
+async def get_reminder_count_today(user_id: int):
+    today = date.today()
+    p = _get_pool()
+    async with p.acquire() as conn:
+        n = await conn.fetchval("SELECT COUNT(*) FROM reminder_log WHERE user_id = $1 AND date = $2", user_id, today)
     return n
 
 
-def get_last_reminder_sent_at(user_id):
-    """Время последнего напоминания сегодня (datetime или None)."""
-    today = date.today().isoformat()
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute(
-        "SELECT sent_at FROM reminder_log WHERE user_id = ? AND date = ? ORDER BY sent_at DESC LIMIT 1",
-        (user_id, today)
-    )
-    row = c.fetchone()
-    conn.close()
-    if not row:
+async def get_last_reminder_sent_at(user_id: int):
+    today = date.today()
+    p = _get_pool()
+    async with p.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT sent_at FROM reminder_log WHERE user_id = $1 AND date = $2 ORDER BY sent_at DESC LIMIT 1",
+            user_id, today
+        )
+    if not row or not row["sent_at"]:
         return None
-    try:
-        from datetime import datetime
-        return datetime.fromisoformat(row[0].replace("Z", "+00:00").split("+")[0].strip())
-    except (ValueError, TypeError):
-        return None
+    ts = row["sent_at"]
+    return ts.replace(tzinfo=None) if getattr(ts, "tzinfo", None) else ts
 
 
 # --- Meals ---
 
-def add_meal(user_id, name, calories, protein, fat, carbs):
-    conn = get_conn()
-    c = conn.cursor()
-    today = date.today().isoformat()
-    c.execute(
-        "INSERT INTO meals (user_id, name, calories, protein, fat, carbs, date) VALUES (?,?,?,?,?,?,?)",
-        (user_id, name, calories, protein, fat, carbs, today)
-    )
-    conn.commit()
-    conn.close()
-
-def get_meals_today(user_id):
-    conn = get_conn()
-    c = conn.cursor()
-    today = date.today().isoformat()
-    c.execute("SELECT id, name, calories, protein, fat, carbs FROM meals WHERE user_id=? AND date=?", (user_id, today))
-    rows = c.fetchall()
-    conn.close()
-    return rows
+async def add_meal(user_id: int, name: str, calories: int, protein: float, fat: float, carbs: float):
+    p = _get_pool()
+    today = date.today()
+    async with p.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO meals (user_id, name, calories, protein, fat, carbs, date) VALUES ($1,$2,$3,$4,$5,$6,$7)",
+            user_id, name, calories, protein, fat, carbs, today
+        )
 
 
-def get_last_meal_today(user_id):
-    """Последний приём пищи за сегодня: (created_at ISO str, name, calories) или None."""
-    conn = get_conn()
-    c = conn.cursor()
-    today = date.today().isoformat()
-    c.execute(
-        "SELECT created_at, name, calories FROM meals WHERE user_id=? AND date=? ORDER BY id DESC LIMIT 1",
-        (user_id, today)
-    )
-    row = c.fetchone()
-    conn.close()
-    return row if row else None
+async def get_meals_today(user_id: int):
+    p = _get_pool()
+    today = date.today()
+    async with p.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id, name, calories, protein, fat, carbs FROM meals WHERE user_id = $1 AND date = $2 ORDER BY id",
+            user_id, today
+        )
+    return [(r["id"], r["name"], r["calories"], r["protein"], r["fat"], r["carbs"]) for r in rows]
 
-def delete_last_meal(user_id):
-    conn = get_conn()
-    c = conn.cursor()
-    today = date.today().isoformat()
-    c.execute("SELECT id FROM meals WHERE user_id=? AND date=? ORDER BY id DESC LIMIT 1", (user_id, today))
-    row = c.fetchone()
-    if row:
-        c.execute("DELETE FROM meals WHERE id=?", (row[0],))
-        conn.commit()
-        conn.close()
-        return True
-    conn.close()
+
+async def get_last_meal_today(user_id: int):
+    p = _get_pool()
+    today = date.today()
+    async with p.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT created_at, name, calories FROM meals WHERE user_id = $1 AND date = $2 ORDER BY id DESC LIMIT 1",
+            user_id, today
+        )
+    if not row:
+        return None
+    created = row["created_at"]
+    if hasattr(created, "isoformat"):
+        created = created.isoformat()
+    return (str(created), row["name"], int(row["calories"] or 0))
+
+
+async def delete_last_meal(user_id: int):
+    p = _get_pool()
+    today = date.today()
+    async with p.acquire() as conn:
+        row = await conn.fetchrow("SELECT id FROM meals WHERE user_id = $1 AND date = $2 ORDER BY id DESC LIMIT 1", user_id, today)
+        if row:
+            await conn.execute("DELETE FROM meals WHERE id = $1", row["id"])
+            return True
     return False
 
-def delete_meal_by_id(meal_id, user_id):
-    """Удаляет приём пищи по id, только если он принадлежит user_id."""
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("DELETE FROM meals WHERE id=? AND user_id=?", (meal_id, user_id))
-    deleted = c.rowcount > 0
-    conn.commit()
-    conn.close()
-    return deleted
 
-def get_daily_totals(user_id, target_date=None):
-    conn = get_conn()
-    c = conn.cursor()
-    d = target_date or date.today().isoformat()
-    c.execute(
-        "SELECT SUM(calories), SUM(protein), SUM(fat), SUM(carbs) FROM meals WHERE user_id=? AND date=?",
-        (user_id, d)
-    )
-    row = c.fetchone()
-    conn.close()
+async def delete_meal_by_id(meal_id: int, user_id: int):
+    p = _get_pool()
+    async with p.acquire() as conn:
+        r = await conn.execute("DELETE FROM meals WHERE id = $1 AND user_id = $2", meal_id, user_id)
+    return r == "DELETE 1"
+
+
+async def get_daily_totals(user_id: int, target_date: date | None = None):
+    p = _get_pool()
+    d = target_date or date.today()
+    async with p.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT SUM(calories) AS cal, SUM(protein) AS prot, SUM(fat) AS fat, SUM(carbs) AS carb FROM meals WHERE user_id = $1 AND date = $2",
+            user_id, d
+        )
     return {
-        "calories": row[0] or 0,
-        "protein": row[1] or 0,
-        "fat": row[2] or 0,
-        "carbs": row[3] or 0
+        "calories": int(row["cal"] or 0),
+        "protein": float(row["prot"] or 0),
+        "fat": float(row["fat"] or 0),
+        "carbs": float(row["carb"] or 0),
     }
 
-def get_meals_range(user_id, from_date, to_date):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute(
-        "SELECT date, SUM(calories), SUM(protein), SUM(fat), SUM(carbs) FROM meals WHERE user_id=? AND date BETWEEN ? AND ? GROUP BY date ORDER BY date",
-        (user_id, from_date, to_date)
-    )
-    rows = c.fetchall()
-    conn.close()
-    return rows
+
+async def get_meals_range(user_id: int, from_date: date, to_date: date):
+    p = _get_pool()
+    async with p.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT date::text AS d, SUM(calories) AS cal, SUM(protein) AS prot, SUM(fat) AS fat, SUM(carbs) AS carb
+               FROM meals WHERE user_id = $1 AND date BETWEEN $2 AND $3 GROUP BY date ORDER BY date""",
+            user_id, from_date, to_date
+        )
+    return [(r["d"], r["cal"] or 0, r["prot"] or 0, r["fat"] or 0, r["carb"] or 0) for r in rows]
+
 
 # --- Weight ---
 
-def log_weight(user_id, weight):
-    conn = get_conn()
-    c = conn.cursor()
-    today = date.today().isoformat()
-    c.execute("INSERT INTO weight_log (user_id, weight, date) VALUES (?,?,?)", (user_id, weight, today))
-    # Update current weight in users table
-    c.execute("UPDATE users SET weight=? WHERE user_id=?", (weight, user_id))
-    conn.commit()
-    conn.close()
+async def log_weight(user_id: int, weight: float):
+    p = _get_pool()
+    today = date.today()
+    async with p.acquire() as conn:
+        await conn.execute("INSERT INTO weight_log (user_id, weight, date) VALUES ($1,$2,$3)", user_id, weight, today)
+        await conn.execute("UPDATE users SET weight = $1 WHERE user_id = $2", weight, user_id)
 
-def get_weight_history(user_id, limit=30):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("SELECT weight, date FROM weight_log WHERE user_id=? ORDER BY date DESC LIMIT ?", (user_id, limit))
-    rows = c.fetchall()
-    conn.close()
-    return rows
+
+async def get_weight_history(user_id: int, limit: int = 30):
+    p = _get_pool()
+    async with p.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT weight, date FROM weight_log WHERE user_id = $1 ORDER BY date DESC LIMIT $2",
+            user_id, limit
+        )
+    return [(r["weight"], r["date"].isoformat() if hasattr(r["date"], "isoformat") else str(r["date"])) for r in rows]
+
 
 # --- Quick foods ---
 
-def get_quick_foods(user_id):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("SELECT id, name, calories, protein, fat, carbs FROM quick_foods WHERE user_id=?", (user_id,))
-    rows = c.fetchall()
-    conn.close()
-    return rows
+async def get_quick_foods(user_id: int):
+    p = _get_pool()
+    async with p.acquire() as conn:
+        rows = await conn.fetch("SELECT id, name, calories, protein, fat, carbs FROM quick_foods WHERE user_id = $1", user_id)
+    return [(r["id"], r["name"], r["calories"], r["protein"], r["fat"], r["carbs"]) for r in rows]
 
-def add_quick_food(user_id, name, calories, protein, fat, carbs):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute(
-        "INSERT INTO quick_foods (user_id, name, calories, protein, fat, carbs) VALUES (?,?,?,?,?,?)",
-        (user_id, name, calories, protein, fat, carbs)
-    )
-    conn.commit()
-    conn.close()
 
-def delete_quick_food(food_id, user_id):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("DELETE FROM quick_foods WHERE id=? AND user_id=?", (food_id, user_id))
-    conn.commit()
-    conn.close()
+async def add_quick_food(user_id: int, name: str, calories: int, protein: float, fat: float, carbs: float):
+    p = _get_pool()
+    async with p.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO quick_foods (user_id, name, calories, protein, fat, carbs) VALUES ($1,$2,$3,$4,$5,$6)",
+            user_id, name, calories, protein, fat, carbs
+        )
+
+
+async def delete_quick_food(food_id: int, user_id: int):
+    p = _get_pool()
+    async with p.acquire() as conn:
+        await conn.execute("DELETE FROM quick_foods WHERE id = $1 AND user_id = $2", food_id, user_id)

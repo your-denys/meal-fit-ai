@@ -175,11 +175,11 @@ async def food_confirmed(callback: CallbackQuery, state: FSMContext):
     food = data["food"]
     user_id = callback.from_user.id
 
-    add_meal(user_id, food["name"], food["calories"], food["protein"], food["fat"], food["carbs"])
+    await add_meal(user_id, food["name"], food["calories"], food["protein"], food["fat"], food["carbs"])
     await state.clear()
 
-    user = get_user(user_id)
-    totals = get_daily_totals(user_id)
+    user = await get_user(user_id)
+    totals = await get_daily_totals(user_id)
 
     await callback.message.edit_text(f"✅ <b>{food['name']}</b> добавлено!", parse_mode="HTML")
 

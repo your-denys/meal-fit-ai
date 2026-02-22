@@ -57,13 +57,13 @@
 
 ### 7. Напоминания «пора поесть»
 
-- Фоновая задача (каждые 15 минут) проверяет слоты **10:00, 14:00, 18:00, 20:00** (по серверному времени); после **22:00** напоминания не отправляются.
-- Для пользователей с включёнными напоминаниями и заданными целями: проверка недобора по калориям, белку и углеводам (пороги: 50 ккал, 8 г белка, 15 г углеводов). Если недобор есть и лимит напоминаний за день не исчерпан (2/3/4 по настройке), формируется короткий совет (get_reminder_suggestion) с учётом времени суток и уже съеденного; сообщение отправляется в чат, отправка логируется в `reminder_log`.
+- Фоновая задача (каждые 15 минут) в окне **8:00–22:00** проверяет пользователей с включёнными напоминаниями и недобором по калориям/белку/углеводам (пороги: 50 ккал, 8 г белка, 15 г углеводов). Напоминание отправляется, когда прошло **не менее 45/90/120 минут** после последнего приёма (в зависимости от калорийности приёма) и не превышен лимит в день (2/3/4). Между двумя напоминаниями одному пользователю — не менее 90 минут.
+- Формируется короткий совет (get_reminder_suggestion) с учётом времени суток и уже съеденного; отправка логируется в `reminder_log`.
 - **Настройки в профиле:** кнопка «Напоминания «пора поесть»» — вкл/выкл и выбор количества напоминаний в день (2, 3 или 4).
 
 ### 8. Прочее
 
-- **Сегодня:** список приёмов пищи за текущий день с КБЖУ по каждому и итогом по калориям/макросам (и по целям, если профиль заполнен).
+- **Сегодня:** список приёмов пищи за текущий день с КБЖУ по каждому и итогом по калориям/макросам (и по целям, если профиль заполнен). Кнопка «Удалить блюдо» открывает выбор блюда для удаления из дня.
 - **Отмена последнего приёма:** команда `/undo` удаляет последнюю запись за сегодня из `meals`.
 
 ---
@@ -135,11 +135,11 @@
 ```
 meal-fit-ai/
 ├── bot.py              # Точка входа: Bot, Dispatcher, роутеры, reminder_loop, polling
-├── config.py           # BOT_TOKEN, GEMINI_API_KEY из .env
-├── database.py         # SQLite: init_db, users/meals/weight_log/reminder_log/quick_foods, все get/save
+├── config.py           # BOT_TOKEN, GEMINI_API_KEY, DATABASE_URL из .env
+├── database.py         # PostgreSQL (asyncpg): пул, init_db, users/meals/weight_log/reminder_log/quick_foods, все get/save (async)
 ├── calculator.py       # Миффлин–Сан Жеор, расчёт воды, format_daily_summary
 ├── gemini_helper.py    # Gemini: анализ фото/текста, расчёт целей, советы по приёму и напоминаниям
-├── reminders.py        # run_reminders(bot), reminder_loop(bot) — слоты 10/14/18/20, до 22:00
+├── reminders.py        # run_reminders(bot), reminder_loop(bot) — по интервалу после последнего приёма, 8:00–22:00
 ├── keyboards.py        # main_keyboard, meal_choice_keyboard, confirm_food_keyboard, stats_keyboard, quick_foods_keyboard, gender_keyboard и др.
 ├── handlers/
 │   ├── common.py       # /start, /help, Сегодня, Что съесть?, /undo
@@ -156,29 +156,29 @@ meal-fit-ai/
 ### Роль модулей
 
 - **bot.py:** создаёт Bot и Dispatcher, подключает роутеры (common, profile, stats, quick, food), снимает webhook, запускает `reminder_loop(bot)` и polling.
-- **database.py:** одна БД `meal_fit.db`; при старте выполняется `init_db()` (создание/миграции таблиц).
+- **database.py:** PostgreSQL (Neon) через asyncpg; при старте создаётся пул, вызывается `await init_db(pool)` (создание таблиц и при необходимости миграции колонок).
 - **gemini_helper.py:** все запросы к Gemini (модель gemini-2.5-flash): анализ еды, расчёт целей, советы по приёму пищи и текст напоминания.
 - **calculator.py:** локальный расчёт целей (fallback) и нормы воды; форматирование сводки за день.
-- **reminders.py:** раз в 15 минут проверяет час; в слоты 10/14/18/20 и при недоборе отправляет напоминание и пишет в `reminder_log`.
+- **reminders.py:** раз в 15 минут проверяет пользователей с недобором; напоминание отправляется, когда прошло достаточно времени после последнего приёма (45/90/120 мин) и не превышен лимит в день; пишет в `reminder_log`.
 
 ---
 
 ## База данных
 
-**SQLite, файл:** `meal_fit.db`
+**PostgreSQL (Neon)** через **asyncpg**. Строка подключения задаётся в переменной окружения `DATABASE_URL`; для Neon в URL автоматически добавляется `sslmode=require`, если его ещё нет.
 
 ### Таблица `users`
 
 | Поле | Тип | Описание |
 |------|-----|----------|
-| user_id | INTEGER PK | Telegram user id |
+| user_id | BIGINT PK | Telegram user id |
 | name | TEXT | Имя (опционально) |
 | weight | REAL | Текущий вес, кг |
 | height | REAL | Рост, см |
 | age | INTEGER | Возраст |
 | gender | TEXT | male / female |
 | activity | TEXT | sedentary / light / active (образ жизни) |
-| goal | TEXT | loss / gain / maintain / cutting или свой текст |
+| goal | TEXT | loss / gain / maintain / cutting / recomp или свой текст |
 | target_weight | REAL | Желаемый вес, кг (NULL если не задан) |
 | calories_goal | INTEGER | Цель по калориям в день |
 | protein_goal | INTEGER | Цель по белкам, г |
@@ -188,46 +188,46 @@ meal-fit-ai/
 | pace | TEXT | slow / fast |
 | reminders_enabled | INTEGER | 1 — вкл, 0 — выкл |
 | reminders_per_day | INTEGER | 2, 3 или 4 |
-| created_at | TEXT | Время создания записи |
+| created_at | TIMESTAMP | Время создания записи |
 
 ### Таблица `meals`
 
 | Поле | Тип | Описание |
 |------|-----|----------|
-| id | INTEGER PK | Автоинкремент |
-| user_id | INTEGER | Владелец |
+| id | SERIAL PK | Автоинкремент |
+| user_id | BIGINT | Владелец |
 | name | TEXT | Название блюда/продукта |
 | calories | INTEGER | Ккал |
 | protein | REAL | Белки, г |
 | fat | REAL | Жиры, г |
 | carbs | REAL | Углеводы, г |
-| date | TEXT | Дата (YYYY-MM-DD) |
-| created_at | TEXT | Время добавления |
+| date | DATE | Дата |
+| created_at | TIMESTAMP | Время добавления |
 
 ### Таблица `weight_log`
 
 | Поле | Тип | Описание |
 |------|-----|----------|
-| id | INTEGER PK | Автоинкремент |
-| user_id | INTEGER | Владелец |
+| id | SERIAL PK | Автоинкремент |
+| user_id | BIGINT | Владелец |
 | weight | REAL | Вес, кг |
-| date | TEXT | Дата записи |
+| date | DATE | Дата записи |
 
 ### Таблица `reminder_log`
 
 | Поле | Тип | Описание |
 |------|-----|----------|
-| id | INTEGER PK | Автоинкремент |
-| user_id | INTEGER | Кому отправлено |
-| sent_at | TEXT | ISO datetime отправки |
-| date | TEXT | Дата (для лимита в день) |
+| id | SERIAL PK | Автоинкремент |
+| user_id | BIGINT | Кому отправлено |
+| sent_at | TIMESTAMP | Время отправки |
+| date | DATE | Дата (для лимита в день) |
 
 ### Таблица `quick_foods`
 
 | Поле | Тип | Описание |
 |------|-----|----------|
-| id | INTEGER PK | Автоинкремент |
-| user_id | INTEGER | Владелец |
+| id | SERIAL PK | Автоинкремент |
+| user_id | BIGINT | Владелец |
 | name | TEXT | Название |
 | calories | INTEGER | Ккал |
 | protein | REAL | Белки, г |
@@ -253,9 +253,12 @@ pip install -r requirements.txt
 ```
 BOT_TOKEN=токен_от_BotFather
 GEMINI_API_KEY=ключ_Google_AI_Studio
+DATABASE_URL=postgresql://user:password@host/dbname
 ```
 
-Без `GEMINI_API_KEY` не будут работать: распознавание еды по фото/тексту, расчёт целей ИИ, советы «Что съесть?» и напоминания (используется fallback-калькулятор для целей).
+- **BOT_TOKEN** — обязателен (токен от [@BotFather](https://t.me/BotFather)).
+- **DATABASE_URL** — обязателен; строка подключения к PostgreSQL (например [Neon](https://neon.tech)). Для Neon в URL автоматически добавляется `?sslmode=require`, если его ещё нет.
+- **GEMINI_API_KEY** — без него не работают распознавание еды по фото/тексту, расчёт целей ИИ, советы «Что съесть?» и текст напоминаний (для целей используется fallback-калькулятор).
 
 ### 3. Запуск
 
@@ -293,8 +296,9 @@ python bot.py
    | Key | Value | Где взять |
    |-----|--------|-----------|
    | `BOT_TOKEN` | твой токен бота | [@BotFather](https://t.me/BotFather) → /newbot или /mybots → API Token |
+   | `DATABASE_URL` | строка подключения к PostgreSQL | [Neon](https://neon.tech) → создай проект → Connection string (с sslmode=require для Neon) |
    | `GEMINI_API_KEY` | твой ключ API | [Google AI Studio](https://aistudio.google.com/apikey) → Get API key |
-   Без этих переменных бот на Render не запустится (BOT_TOKEN обязателен) или будет без распознавания еды и ИИ-расчётов (если нет GEMINI_API_KEY). После добавления или изменения переменных при необходимости нажми **Manual Deploy** → **Deploy latest commit**, чтобы сервис перезапустился с новыми значениями.
+   Без `BOT_TOKEN` и `DATABASE_URL` бот не запустится. Без `GEMINI_API_KEY` не будут работать распознавание еды и ИИ-расчёты. После добавления или изменения переменных при необходимости нажми **Manual Deploy** → **Deploy latest commit**.
 6. Нажми **Create Web Service**. Render соберёт проект и запустит сервис. В логах должно быть что-то вроде: `Keep-alive HTTP on 0.0.0.0:10000` и запуск бота.
 
 После деплоя Render даст URL вида:  

@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 async def start(message: Message, state: FSMContext):
     logger.info("Обработка /start от user_id=%s", message.from_user.id)
     try:
-        user = get_user(message.from_user.id)
+        user = await get_user(message.from_user.id)
         if not user:
             await state.set_state(ProfileState.weight)
             await message.answer(
@@ -40,7 +40,7 @@ async def start(message: Message, state: FSMContext):
             )
             return
         else:
-            totals = get_daily_totals(message.from_user.id)
+            totals = await get_daily_totals(message.from_user.id)
             summary = format_daily_summary(totals, user)
             await message.answer(
                 f"👋 С возвращением!\n\n{summary}",
@@ -119,9 +119,9 @@ def _today_text(meals: list, totals: dict, user: dict | None) -> str:
 @router.message(F.text == "🍽 Сегодня")
 async def today(message: Message):
     user_id = message.from_user.id
-    meals = get_meals_today(user_id)
-    user = get_user(user_id)
-    totals = get_daily_totals(user_id)
+    meals = await get_meals_today(user_id)
+    user = await get_user(user_id)
+    totals = await get_daily_totals(user_id)
 
     if not meals:
         await message.answer("Сегодня ещё ничего не добавлено 🙂")
@@ -137,7 +137,7 @@ async def today(message: Message):
 @router.callback_query(F.data == "today_delete_menu")
 async def today_delete_menu(callback: CallbackQuery):
     user_id = callback.from_user.id
-    meals = get_meals_today(user_id)
+    meals = await get_meals_today(user_id)
     await callback.answer()
     if not meals:
         await callback.message.edit_text("Сегодня ещё ничего не добавлено 🙂")
@@ -160,13 +160,13 @@ async def today_del_meal(callback: CallbackQuery):
         await callback.answer("Ошибка")
         return
     user_id = callback.from_user.id
-    deleted = delete_meal_by_id(meal_id, user_id)
+    deleted = await delete_meal_by_id(meal_id, user_id)
     await callback.answer("Удалено" if deleted else "Не найдено")
     if not deleted:
         return
-    meals = get_meals_today(user_id)
-    user = get_user(user_id)
-    totals = get_daily_totals(user_id)
+    meals = await get_meals_today(user_id)
+    user = await get_user(user_id)
+    totals = await get_daily_totals(user_id)
     if not meals:
         await callback.message.edit_text("✅ Блюдо удалено. Сегодня больше нет записей.")
         return
@@ -178,7 +178,7 @@ async def today_del_meal(callback: CallbackQuery):
 
 @router.message(F.text == "💡 Что съесть?")
 async def what_to_eat_menu(message: Message):
-    user = get_user(message.from_user.id)
+    user = await get_user(message.from_user.id)
     if not user or not user.get("calories_goal"):
         await message.answer(
             "Сначала заполни профиль (👤 Мой профиль), чтобы я знал твои цели по КБЖУ и мог дать совет.",
@@ -205,9 +205,9 @@ async def meal_suggestion_callback(callback: CallbackQuery):
     await callback.answer()
     await callback.message.edit_text("🔍 Подбираю блюдо...")
 
-    user = get_user(user_id)
-    totals = get_daily_totals(user_id)
-    meals_today = get_meals_today(user_id)
+    user = await get_user(user_id)
+    totals = await get_daily_totals(user_id)
+    meals_today = await get_meals_today(user_id)
     eaten_names = [m[1] for m in meals_today] if meals_today else []
     suggestion = get_meal_suggestion(totals, user, meal_type, eaten_today=eaten_names)
 
@@ -221,7 +221,7 @@ async def meal_suggestion_callback(callback: CallbackQuery):
 
 @router.message(Command("undo"))
 async def undo(message: Message):
-    deleted = delete_last_meal(message.from_user.id)
+    deleted = await delete_last_meal(message.from_user.id)
     if deleted:
         await message.answer("✅ Последний приём пищи удалён.")
     else:

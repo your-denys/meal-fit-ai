@@ -106,7 +106,7 @@ def goal_pace_keyboard():
 @router.message(F.text == "👤 Мой профиль")
 @router.message(Command("settings"))
 async def profile_button(message: Message, state: FSMContext):
-    user = get_user(message.from_user.id)
+    user = await get_user(message.from_user.id)
     if not user:
         await state.set_state(ProfileState.weight)
         await message.answer(
@@ -163,7 +163,7 @@ def kbju_edit_keyboard():
 
 @router.callback_query(F.data == "profile_edit_kbju")
 async def profile_edit_kbju_start(callback: CallbackQuery, state: FSMContext):
-    user = get_user(callback.from_user.id)
+    user = await get_user(callback.from_user.id)
     if not user:
         await callback.answer("Сначала заполни профиль.")
         return
@@ -187,7 +187,7 @@ async def profile_kbju_choose_field(callback: CallbackQuery, state: FSMContext):
     if key not in KBJU_FIELDS:
         await callback.answer()
         return
-    user = get_user(callback.from_user.id)
+    user = await get_user(callback.from_user.id)
     if not user:
         await callback.answer("Сначала заполни профиль.")
         return
@@ -218,7 +218,7 @@ async def profile_edit_kbju_apply(message: Message, state: FSMContext):
     if value < lo or value > hi:
         await message.answer(f"Значение должно быть от {lo} до {hi}. Введи снова.")
         return
-    user = get_user(message.from_user.id)
+    user = await get_user(message.from_user.id)
     if not user:
         await state.clear()
         return
@@ -231,9 +231,9 @@ async def profile_edit_kbju_apply(message: Message, state: FSMContext):
         updates.get("carbs_goal", user.get("carbs_goal")) or 200
     )
     updates["water_goal"] = water
-    save_user(message.from_user.id, updates)
+    await save_user(message.from_user.id, updates)
     await state.clear()
-    u = get_user(message.from_user.id)
+    u = await get_user(message.from_user.id)
     await message.answer(
         f"✅ Обновлено. Цели: 🔥 {u.get('calories_goal')} ккал · 🥩 {u.get('protein_goal')} г · "
         f"🧈 {u.get('fat_goal')} г · 🍞 {u.get('carbs_goal')} г · 💧 {u.get('water_goal')} мл",
@@ -261,7 +261,7 @@ def reminders_keyboard(user: dict):
 
 @router.callback_query(F.data == "profile_reminders")
 async def profile_reminders_screen(callback: CallbackQuery):
-    user = get_user(callback.from_user.id)
+    user = await get_user(callback.from_user.id)
     if not user:
         await callback.answer("Сначала заполни профиль.")
         return
@@ -280,7 +280,7 @@ async def profile_reminders_screen(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("profile_reminders_"))
 async def profile_reminders_toggle(callback: CallbackQuery):
     action = callback.data.replace("profile_reminders_", "")
-    user = get_user(callback.from_user.id)
+    user = await get_user(callback.from_user.id)
     if not user:
         await callback.answer()
         return
@@ -295,9 +295,9 @@ async def profile_reminders_toggle(callback: CallbackQuery):
     else:
         await callback.answer()
         return
-    save_user(callback.from_user.id, updates)
+    await save_user(callback.from_user.id, updates)
     await callback.answer("Сохранено")
-    user = get_user(callback.from_user.id)
+    user = await get_user(callback.from_user.id)
     status = "включены" if (user.get("reminders_enabled") or 0) != 0 else "выключены"
     per_day = user.get("reminders_per_day") or 3
     text = (
@@ -526,7 +526,7 @@ async def get_target_weight(message: Message, state: FSMContext):
             "carbs_goal": carbs,
             "water_goal": water,
         }
-        save_user(message.from_user.id, user_data)
+        await save_user(message.from_user.id, user_data)
         await state.clear()
 
         text = (
@@ -565,10 +565,10 @@ async def weight_prompt(message: Message, state: FSMContext):
 async def save_weight(message: Message, state: FSMContext):
     try:
         weight = float(message.text.replace(",", "."))
-        log_weight(message.from_user.id, weight)
+        await log_weight(message.from_user.id, weight)
         await state.clear()
 
-        user = get_user(message.from_user.id)
+        user = await get_user(message.from_user.id)
         text = f"✅ Вес <b>{weight} кг</b> записан!"
 
         # Пересчёт целей КБЖУ и воды с учётом нового веса
@@ -609,7 +609,7 @@ async def save_weight(message: Message, state: FSMContext):
                 "carbs_goal": carbs,
                 "water_goal": water,
             })
-            save_user(message.from_user.id, updates)
+            await save_user(message.from_user.id, updates)
             text += f"\n\n🔄 Цели пересчитаны под новый вес:\n🔥 {cal} ккал · 🥩 {prot} г · 🧈 {fat} г · 🍞 {carbs} г · 💧 {water} мл"
 
         if user and user.get("target_weight"):

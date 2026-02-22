@@ -14,7 +14,7 @@ class QuickState(StatesGroup):
 
 @router.message(F.text == "⚡ Быстрое добавление")
 async def quick_menu(message: Message):
-    foods = get_quick_foods(message.from_user.id)
+    foods = await get_quick_foods(message.from_user.id)
     if not foods:
         await message.answer(
             "⚡ <b>Быстрое добавление</b>\n\n"
@@ -34,7 +34,7 @@ async def quick_menu(message: Message):
 async def quick_add(callback: CallbackQuery):
     food_id = int(callback.data.replace("quick_add_", ""))
     user_id = callback.from_user.id
-    foods = get_quick_foods(user_id)
+    foods = await get_quick_foods(user_id)
     food = next((f for f in foods if f[0] == food_id), None)
 
     if not food:
@@ -42,10 +42,10 @@ async def quick_add(callback: CallbackQuery):
         return
 
     fid, name, cal, p, f, c = food
-    add_meal(user_id, name, cal, p, f, c)
+    await add_meal(user_id, name, cal, p, f, c)
 
-    user = get_user(user_id)
-    totals = get_daily_totals(user_id)
+    user = await get_user(user_id)
+    totals = await get_daily_totals(user_id)
 
     await callback.answer(f"✅ {name} добавлено!")
 
@@ -75,7 +75,7 @@ async def quick_analyze(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    add_quick_food(
+    await add_quick_food(
         message.from_user.id,
         result["name"],
         result["calories"],
@@ -93,7 +93,7 @@ async def quick_analyze(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "quick_delete")
 async def quick_delete_menu(callback: CallbackQuery):
-    foods = get_quick_foods(callback.from_user.id)
+    foods = await get_quick_foods(callback.from_user.id)
     if not foods:
         await callback.answer("Нечего удалять.")
         return
@@ -107,10 +107,10 @@ async def quick_delete_menu(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("quick_del_"))
 async def quick_del_confirm(callback: CallbackQuery):
     food_id = int(callback.data.replace("quick_del_", ""))
-    delete_quick_food(food_id, callback.from_user.id)
+    await delete_quick_food(food_id, callback.from_user.id)
     await callback.answer("Удалено!")
 
-    foods = get_quick_foods(callback.from_user.id)
+    foods = await get_quick_foods(callback.from_user.id)
     await callback.message.edit_text(
         "⚡ <b>Быстрое добавление</b>\nВыбери продукт:",
         parse_mode="HTML",
@@ -119,7 +119,7 @@ async def quick_del_confirm(callback: CallbackQuery):
 
 @router.callback_query(F.data == "quick_back")
 async def quick_back(callback: CallbackQuery):
-    foods = get_quick_foods(callback.from_user.id)
+    foods = await get_quick_foods(callback.from_user.id)
     await callback.message.edit_text(
         "⚡ <b>Быстрое добавление</b>\nВыбери продукт:",
         parse_mode="HTML",

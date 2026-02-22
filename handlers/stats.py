@@ -86,8 +86,8 @@ def _format_date_short(d: str) -> str:
 async def stats_menu(message: Message):
     """По умолчанию показываем за сегодня, ниже кнопки Неделя / Месяц."""
     user_id = message.from_user.id
-    user = get_user(user_id)
-    totals = get_daily_totals(user_id)
+    user = await get_user(user_id)
+    totals = await get_daily_totals(user_id)
     if user:
         text = format_daily_summary(totals, user)
     else:
@@ -109,8 +109,8 @@ async def stats_menu(message: Message):
 async def stats_week(callback: CallbackQuery):
     user_id = callback.from_user.id
     today = date.today()
-    from_date = (today - timedelta(days=6)).isoformat()
-    rows = get_meals_range(user_id, from_date, today.isoformat())
+    from_date = today - timedelta(days=6)
+    rows = await get_meals_range(user_id, from_date, today)
 
     if not rows:
         await callback.message.answer("Нет данных за последние 7 дней.")
@@ -130,8 +130,8 @@ async def stats_week(callback: CallbackQuery):
 async def stats_month(callback: CallbackQuery):
     user_id = callback.from_user.id
     today = date.today()
-    from_date = (today - timedelta(days=29)).isoformat()
-    rows = get_meals_range(user_id, from_date, today.isoformat())
+    from_date = today - timedelta(days=29)
+    rows = await get_meals_range(user_id, from_date, today)
 
     if not rows:
         await callback.message.answer("Нет данных за последние 30 дней.")
@@ -151,7 +151,7 @@ async def stats_month(callback: CallbackQuery):
 @router.callback_query(F.data == "stats_weight")
 async def stats_weight(callback: CallbackQuery):
     user_id = callback.from_user.id
-    rows = get_weight_history(user_id, 30)
+    rows = await get_weight_history(user_id, 30)
 
     if not rows or len(rows) < 2:
         await callback.message.answer("Нужно хотя бы 2 записи веса для графика. Записывай вес регулярно!")
@@ -159,7 +159,7 @@ async def stats_weight(callback: CallbackQuery):
         return
 
     chart = make_weight_chart(rows)
-    user = get_user(user_id)
+    user = await get_user(user_id)
     caption = "⚖️ <b>Динамика веса</b>"
     if user and user.get("target_weight"):
         diff = user["weight"] - user["target_weight"]
