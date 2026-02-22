@@ -165,6 +165,26 @@ def get_reminder_count_today(user_id):
     return n
 
 
+def get_last_reminder_sent_at(user_id):
+    """Время последнего напоминания сегодня (datetime или None)."""
+    today = date.today().isoformat()
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(
+        "SELECT sent_at FROM reminder_log WHERE user_id = ? AND date = ? ORDER BY sent_at DESC LIMIT 1",
+        (user_id, today)
+    )
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        return None
+    try:
+        from datetime import datetime
+        return datetime.fromisoformat(row[0].replace("Z", "+00:00").split("+")[0].strip())
+    except (ValueError, TypeError):
+        return None
+
+
 # --- Meals ---
 
 def add_meal(user_id, name, calories, protein, fat, carbs):
