@@ -187,6 +187,20 @@ def get_meals_today(user_id):
     conn.close()
     return rows
 
+
+def get_last_meal_today(user_id):
+    """Последний приём пищи за сегодня: (created_at ISO str, name, calories) или None."""
+    conn = get_conn()
+    c = conn.cursor()
+    today = date.today().isoformat()
+    c.execute(
+        "SELECT created_at, name, calories FROM meals WHERE user_id=? AND date=? ORDER BY id DESC LIMIT 1",
+        (user_id, today)
+    )
+    row = c.fetchone()
+    conn.close()
+    return row if row else None
+
 def delete_last_meal(user_id):
     conn = get_conn()
     c = conn.cursor()

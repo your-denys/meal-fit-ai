@@ -1,9 +1,9 @@
 import logging
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
-from database import get_user, get_meals_today, delete_last_meal, get_daily_totals
+from database import get_user, get_meals_today, delete_last_meal, delete_meal_by_id, get_daily_totals
 from keyboards import main_keyboard, stats_keyboard, meal_choice_keyboard
 from calculator import format_daily_summary
 from gemini_helper import get_meal_suggestion
@@ -58,28 +58,46 @@ async def help_cmd(message: Message):
         parse_mode="HTML"
     )
 
-@router.message(F.text == "🍽 Сегодня")
-async def today(message: Message):
-    user_id = message.from_user.id
+def _today_text_and_keyboard(user_id: int):
+    """Текст и клавиатура для «Сегодня»: список приёмов и кнопки удаления."""
     meals = get_meals_today(user_id)
     user = get_user(user_id)
     totals = get_daily_totals(user_id)
-
     if not meals:
-        await message.answer("Сегодня ещё ничего не добавлено 🙂")
-        return
-
+        return "Сегодня ещё ничего не добавлено 🙂", None
     lines = ["🍽 <b>Приёмы пищи сегодня:</b>\n"]
     for i, (mid, name, cal, p, f, c) in enumerate(meals, 1):
         lines.append(f"{i}. {name} — {cal} ккал (Б:{p:.0f} Ж:{f:.0f} У:{c:.0f})")
-
     lines.append("")
     if user:
         lines.append(format_daily_summary(totals, user))
     else:
         lines.append(f"🔥 Итого: {totals['calories']} ккал | Б:{totals['protein']:.0f} Ж:{totals['fat']:.0f} У:{totals['carbs']:.0f}")
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"🗑 Удалить: {m[1][:35]}{'…' if len(m[1]) > 35 else ''}", callback_data=f"today_del_{m[0]}")]
+        for m in meals
+    ])
+    return "\n".join(lines), kb
 
-    await message.answer("\n".join(lines), parse_mode="HTML")
+
+@router.message(F.text == "🍽 Сегодня")
+async def today(message: Message):
+    user_id = message.from_user.id
+    text, kb = _today_text_and_keyboard(user_id)
+    await message.answer(text, parse_mode="HTML", reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("today_del_"))
+async def today_delete_meal(callback: CallbackQuery):
+    meal_id = int(callback.data.replace("today_del_", ""))
+    user_id = callback.from_user.id
+    deleted = delete_meal_by_id(meal_id, user_id)
+    await callback.answer("Удалено" if deleted else "Не найдено")
+    text, kb = _today_text_and_keyboard(user_id)
+    await callback.message.edit_text(
+        text, parse_mode="HTML",
+        reply_markup=kb if kb else InlineKeyboardMarkup(inline_keyboard=[])
+    )
 
 @router.message(F.text == "💡 Что съесть?")
 async def what_to_eat_menu(message: Message):

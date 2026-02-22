@@ -1,6 +1,7 @@
 """
 Напоминания «пора поесть» по недобору КБЖУ. Запускаются в слоты 10:00, 14:00, 18:00, 20:00.
-После 22:00 не отправляем. Учитываются цели пользователя и уже съеденное за день.
+После 22:00 не отправляем. Учитываются цели, сегодняшний рацион и время последнего приёма:
+лёгкий перекус — можно напомнить раньше, плотный приём — позже.
 """
 import asyncio
 import logging
@@ -11,6 +12,7 @@ from database import (
     get_user,
     get_daily_totals,
     get_meals_today,
+    get_last_meal_today,
     get_reminder_count_today,
     log_reminder_sent,
 )
@@ -26,6 +28,15 @@ CUTOFF_HOUR = 22
 MIN_SHORTFALL_CAL = 50
 MIN_SHORTFALL_PROT = 8
 MIN_SHORTFALL_CARB = 15
+
+# Минимальный интервал (мин) после последнего приёма перед напоминанием: от калорийности приёма
+# перекус (~до 200 ккал) — 45 мин, средний приём (200–450) — 90 мин, плотный — 120 мин
+def _min_minutes_after_last_meal(last_meal_calories: int) -> int:
+    if last_meal_calories < 200:
+        return 45
+    if last_meal_calories < 450:
+        return 90
+    return 120
 
 
 async def run_reminders(bot):
@@ -59,7 +70,29 @@ async def run_reminders(bot):
                 continue
             meals_today = get_meals_today(user_id)
             eaten = [m[1] for m in meals_today]
-            text = get_reminder_suggestion(totals, user, eaten, now.hour)
+
+            last_meal = get_last_meal_today(user_id)
+            last_meal_minutes_ago = None
+            last_meal_name = None
+            if last_meal:
+                created_at_str, last_meal_name, last_cal = last_meal[0], last_meal[1], int(last_meal[2] or 0)
+                try:
+                    last_dt = datetime.fromisoformat(created_at_str.replace("Z", "+00:00").split("+")[0].strip())
+                    if last_dt.tzinfo:
+                        last_dt = last_dt.replace(tzinfo=None)
+                    last_meal_minutes_ago = int((now - last_dt).total_seconds() / 60)
+                    min_interval = _min_minutes_after_last_meal(last_cal)
+                    if last_meal_minutes_ago < min_interval:
+                        continue
+                except (ValueError, TypeError):
+                    last_meal_minutes_ago = None
+                    last_meal_name = None
+
+            text = get_reminder_suggestion(
+                totals, user, eaten, now.hour,
+                last_meal_minutes_ago=last_meal_minutes_ago,
+                last_meal_name=last_meal_name,
+            )
             if not text:
                 continue
             await bot.send_message(user_id, "🔔 " + text)
