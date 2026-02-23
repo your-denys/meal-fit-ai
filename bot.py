@@ -41,7 +41,8 @@ async def log_updates_middleware(handler, event, data):
         log_updates.info("→ callback от %s: %s", cq.from_user.id, cq.data)
     return await handler(event, data)
 
-async def main():
+async def setup_bot_dp():
+    """Создать пул БД, бота и диспетчер с роутерами. Используется и для polling, и для webhook."""
     check_config()
     pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5, command_timeout=60)
     set_pool(pool)
@@ -51,14 +52,19 @@ async def main():
     dp = Dispatcher(storage=MemoryStorage())
     dp.update.outer_middleware(log_updates_middleware)
 
-    # Сначала профиль, статистика, быстрые кнопки — потом общий обработчик текста (еда)
     dp.include_router(common.router)
     dp.include_router(profile.router)
     dp.include_router(stats.router)
     dp.include_router(quick.router)
     dp.include_router(food.router)
 
-    # Убедиться, что вебхук снят (иначе getUpdates не придёт)
+    return bot, dp
+
+
+async def main():
+    bot, dp = await setup_bot_dp()
+
+    # Polling: снять вебхук, чтобы обновления шли в getUpdates
     await bot.delete_webhook(drop_pending_updates=True)
     webhook = await bot.get_webhook_info()
     if webhook.url:

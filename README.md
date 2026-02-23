@@ -134,7 +134,8 @@
 
 ```
 meal-fit-ai/
-├── bot.py              # Точка входа: Bot, Dispatcher, роутеры, reminder_loop, polling
+├── bot.py              # setup_bot_dp(), polling (python bot.py)
+├── webhook_server.py   # Webhook для Render: aiohttp, set_webhook, POST /webhook
 ├── config.py           # BOT_TOKEN, GEMINI_API_KEY, DATABASE_URL из .env
 ├── database.py         # PostgreSQL (asyncpg): пул, init_db, users/meals/weight_log/reminder_log/quick_foods, все get/save (async)
 ├── calculator.py       # Миффлин–Сан Жеор, расчёт воды, format_daily_summary
@@ -148,14 +149,14 @@ meal-fit-ai/
 │   ├── stats.py        # Статистика (сегодня/неделя/месяц/график веса)
 │   └── quick.py        # Быстрое добавление: список, добавить, удалить
 ├── requirements.txt
-├── Procfile            # Для деплоя
-├── keep_alive.py       # Для деплоя (удержание процесса)
+├── Procfile            # web: python webhook_server.py
+├── keep_alive.py       # Опционально: polling + HTTP для пингов (если не используешь webhook)
 └── README.md
 ```
 
 ### Роль модулей
 
-- **bot.py:** создаёт Bot и Dispatcher, подключает роутеры (common, profile, stats, quick, food), снимает webhook, запускает `reminder_loop(bot)` и polling.
+- **bot.py:** создаёт Bot и Dispatcher (`setup_bot_dp()`), подключает роутеры. Режим **polling** (`python bot.py`): снимает webhook, запускает `reminder_loop` и `start_polling`. Режим **webhook** (`python webhook_server.py`): ставит webhook, aiohttp принимает POST на `/webhook`.
 - **database.py:** PostgreSQL (Neon) через asyncpg; при старте создаётся пул, вызывается `await init_db(pool)` (создание таблиц и при необходимости миграции колонок).
 - **gemini_helper.py:** все запросы к Gemini (модель gemini-2.5-flash): анализ еды, расчёт целей, советы по приёму пищи и текст напоминания.
 - **calculator.py:** локальный расчёт целей (fallback) и нормы воды; форматирование сводки за день.
@@ -270,61 +271,55 @@ python bot.py
 
 ---
 
-## Деплой на Render (бесплатный тир) + UptimeRobot
+## Деплой на Render (бесплатный тир) — Webhook
 
-На бесплатном плане Render «засыпает» сервис после ~15 минут без входящих запросов. Чтобы бот не засыпал, поднимается HTTP-сервер на порту `PORT`, а внешний сервис (UptimeRobot) пингует его каждые 5–10 минут.
+Бот поддерживает **webhook**: Telegram сам шлёт обновления на твой HTTPS-URL. Сервис на Render просыпается только когда пользователь пишет боту — **UptimeRobot и пинги не нужны**.
 
 ### 1. Репозиторий на GitHub
 
-Код должен быть в GitHub, например:  
-[https://github.com/your-denys/meal-fit-ai](https://github.com/your-denys/meal-fit-ai)
+Код в GitHub, например: [https://github.com/your-denys/meal-fit-ai](https://github.com/your-denys/meal-fit-ai)
 
 ### 2. Создание Web Service на Render
 
-1. Зайди на [render.com](https://render.com) и войди в аккаунт.
-2. **Dashboard** → **New** → **Web Service**.
-3. Подключи репозиторий **your-denys/meal-fit-ai** (если ещё не подключён — авторизуй GitHub и выбери репо).
-4. Настрой сервис:
-   - **Name:** например `meal-fit-ai` или `fitmeal-bot`.
-   - **Region:** выбери ближайший (например Frankfurt).
-   - **Branch:** `main` (или твоя ветка по умолчанию).
-   - **Runtime:** `Python 3`. В корне репо должен быть файл **`.python-version`** с содержимым `3.12` — тогда Render возьмёт Python 3.12 и сборка `pydantic-core` (зависимость aiogram) пройдёт по готовым wheel’ам. Если сборка всё равно падает, в **Environment** добавь переменную `PYTHON_VERSION` = `3.12.2`.
+1. [render.com](https://render.com) → **Dashboard** → **New** → **Web Service**.
+2. Подключи репозиторий **meal-fit-ai**.
+3. Настрой:
+   - **Name:** например `meal-fit-ai`.
+   - **Region:** Frankfurt (или ближе).
+   - **Branch:** `main`.
+   - **Runtime:** Python 3 (в корне желательно `.python-version` с `3.12`).
    - **Build Command:** `pip install --upgrade pip && pip install -r requirements.txt`
-   - **Start Command:** `python keep_alive.py`  
-     (именно так: один процесс с HTTP-сервером и ботом внутри.)
-5. **Environment (обязательно):** на сервере переменные задаются в панели Render, файл `.env` на сервер не заливается (он в `.gitignore`). В карточке сервиса открой вкладку **Environment** и добавь:
-   | Key | Value | Где взять |
-   |-----|--------|-----------|
-   | `BOT_TOKEN` | твой токен бота | [@BotFather](https://t.me/BotFather) → /newbot или /mybots → API Token |
-   | `DATABASE_URL` | строка подключения к PostgreSQL | [Neon](https://neon.tech) → создай проект → Connection string (с sslmode=require для Neon) |
-   | `GEMINI_API_KEY` | твой ключ API | [Google AI Studio](https://aistudio.google.com/apikey) → Get API key |
-   Без `BOT_TOKEN` и `DATABASE_URL` бот не запустится. Без `GEMINI_API_KEY` не будут работать распознавание еды и ИИ-расчёты. После добавления или изменения переменных при необходимости нажми **Manual Deploy** → **Deploy latest commit**.
-6. Нажми **Create Web Service**. Render соберёт проект и запустит сервис. В логах должно быть что-то вроде: `Keep-alive HTTP on 0.0.0.0:10000` и запуск бота.
+   - **Start Command:** `python webhook_server.py`
+4. **Environment** — добавь переменные:
+   | Key | Value |
+   |-----|--------|
+   | `BOT_TOKEN` | токен от [@BotFather](https://t.me/BotFather) |
+   | `DATABASE_URL` | строка подключения PostgreSQL ([Neon](https://neon.tech)) |
+   | `WEBHOOK_BASE_URL` | **полный URL сервиса**, например `https://meal-fit-ai-xxxx.onrender.com` (без слэша в конце) |
+   | `GEMINI_API_KEY` | ключ [Google AI Studio](https://aistudio.google.com/apikey) (опционально) |
+   | `WEBHOOK_SECRET` | (опционально) секрет для заголовка `X-Telegram-Bot-Api-Secret-Token` |
 
-После деплоя Render даст URL вида:  
-`https://meal-fit-ai-xxxx.onrender.com` — он понадобится для пингов.
+   **Важно:** `WEBHOOK_BASE_URL` должен совпадать с URL, который даёт Render (указан в карточке сервиса). После первого деплоя скопируй URL и добавь его в Environment, затем **Manual Deploy**.
+5. **Create Web Service**. После деплоя в логах будет: `Webhook установлен: https://.../webhook`.
 
-### 3. UptimeRobot — чтобы сервис не засыпал
+### 3. Проверка
 
-1. Зайди на [uptimerobot.com](https://uptimerobot.com) (есть бесплатный план).
-2. **Add New Monitor:**
-   - **Monitor Type:** HTTP(s).
-   - **Friendly Name:** например `FitMeal Bot`.
-   - **URL:** твой URL с Render, например `https://meal-fit-ai-xxxx.onrender.com` (без слэша в конце или со слэшем — оба варианта подойдут, главное тот же хост).
-   - **Monitoring Interval:** 5 минут (на бесплатном плане минимум 5 мин — этого достаточно).
-3. Сохрани монитор. UptimeRobot будет раз в 5 минут делать GET-запрос на твой сервис; Render будет считать это трафиком и не будет усыплять инстанс.
+- Открой в браузере `https://твой-сервис.onrender.com` — ответ `FitMeal AI bot is alive!`.
+- Напиши боту в Telegram `/start`. Первое сообщение после «сна» может прийти с задержкой 30–60 сек (cold start), дальше — сразу.
 
-Первый запрос после «сна» может занять 30–60 секунд (cold start), дальше бот отвечает сразу.
+### Локальный запуск (polling)
 
-### 4. Проверка
+Без webhook, для разработки:
 
-- В браузере открой `https://твой-сервис.onrender.com` — должна открыться страница с текстом `FitMeal AI bot is alive!`.
-- Напиши боту в Telegram `/start` — он должен ответить (после холодного старта при необходимости подожди минуту).
+```bash
+# В .env не задавай WEBHOOK_BASE_URL
+python bot.py
+```
 
 ### Важно
 
-- Запускай только **один** Web Service этого бота (один процесс с polling). Два инстанса с одним токеном приведут к конфликту обновлений.
-- На продакшене не запускай бота локально с тем же `BOT_TOKEN` — иначе дублирование и ошибки.
+- Запускай только **один** инстанс бота с одним `BOT_TOKEN` (webhook или polling).
+- Не запускай локально `python bot.py` с тем же токеном, что и на Render — иначе обновления будут уходить только в один из них.
 
 ---
 

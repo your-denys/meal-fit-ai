@@ -115,6 +115,12 @@ async def profile_button(message: Message, state: FSMContext):
             parse_mode="HTML"
         )
     else:
+        # обновляем username при открытии профиля (актуальный @nick)
+        if message.from_user.username is not None and user.get("username") != message.from_user.username:
+            updates = {k: user[k] for k in user if k != "user_id"}
+            updates["username"] = message.from_user.username
+            await save_user(message.from_user.id, updates)
+            user["username"] = message.from_user.username
         goal_label = GOAL_LABELS.get(user.get("goal", ""), user.get("goal", "—"))
         activity_label = ACTIVITY_LABELS.get(user.get("activity", ""), "—")
         kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -231,6 +237,7 @@ async def profile_edit_kbju_apply(message: Message, state: FSMContext):
         updates.get("carbs_goal", user.get("carbs_goal")) or 200
     )
     updates["water_goal"] = water
+    updates["username"] = message.from_user.username
     await save_user(message.from_user.id, updates)
     await state.clear()
     u = await get_user(message.from_user.id)
@@ -285,6 +292,7 @@ async def profile_reminders_toggle(callback: CallbackQuery):
         await callback.answer()
         return
     updates = {k: user[k] for k in user if k != "user_id"}
+    updates["username"] = callback.from_user.username
     if action == "off":
         updates["reminders_enabled"] = 0
     elif action == "on":
@@ -525,6 +533,7 @@ async def get_target_weight(message: Message, state: FSMContext):
             "fat_goal": fat,
             "carbs_goal": carbs,
             "water_goal": water,
+            "username": message.from_user.username,
         }
         await save_user(message.from_user.id, user_data)
         await state.clear()
@@ -608,6 +617,7 @@ async def save_weight(message: Message, state: FSMContext):
                 "fat_goal": fat,
                 "carbs_goal": carbs,
                 "water_goal": water,
+                "username": message.from_user.username,
             })
             await save_user(message.from_user.id, updates)
             text += f"\n\n🔄 Цели пересчитаны под новый вес:\n🔥 {cal} ккал · 🥩 {prot} г · 🧈 {fat} г · 🍞 {carbs} г · 💧 {water} мл"

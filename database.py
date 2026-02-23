@@ -41,10 +41,11 @@ async def init_db(pool: asyncpg.Pool | None = None):
                 pace TEXT,
                 reminders_enabled INTEGER DEFAULT 1,
                 reminders_per_day INTEGER DEFAULT 3,
+                username TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        for col, typ in [("water_goal", "INTEGER"), ("pace", "TEXT")]:
+        for col, typ in [("water_goal", "INTEGER"), ("pace", "TEXT"), ("username", "TEXT")]:
             try:
                 await conn.execute(f"ALTER TABLE users ADD COLUMN {col} {typ}")
             except asyncpg.exceptions.DuplicateColumnError:
@@ -97,7 +98,7 @@ async def init_db(pool: asyncpg.Pool | None = None):
 USER_KEYS = [
     "user_id", "name", "weight", "height", "age", "gender", "activity", "goal",
     "target_weight", "calories_goal", "protein_goal", "fat_goal", "carbs_goal", "water_goal", "pace",
-    "reminders_enabled", "reminders_per_day", "created_at"
+    "reminders_enabled", "reminders_per_day", "username", "created_at"
 ]
 
 
