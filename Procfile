@@ -1,4 +1,2 @@
-# Webhook (рекомендуется для Render): не нужен UptimeRobot, сервис просыпается при запросах от Telegram
+# Webhook: Telegram шлёт обновления на URL, сервис просыпается при сообщениях — UptimeRobot не нужен
 web: python webhook_server.py
-
-# Локально с polling (без WEBHOOK_BASE_URL): python bot.py

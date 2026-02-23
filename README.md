@@ -273,7 +273,7 @@ python bot.py
 
 ## Деплой на Render (бесплатный тир) — Webhook
 
-Бот поддерживает **webhook**: Telegram сам шлёт обновления на твой HTTPS-URL. Сервис на Render просыпается только когда пользователь пишет боту — **UptimeRobot и пинги не нужны**.
+Бот работает через **webhook**: Telegram сам шлёт обновления на твой HTTPS-URL. Сервис просыпается, когда пользователь пишет боту — **UptimeRobot не нужен**.
 
 ### 1. Репозиторий на GitHub
 
@@ -299,8 +299,8 @@ python bot.py
    | `GEMINI_API_KEY` | ключ [Google AI Studio](https://aistudio.google.com/apikey) (опционально) |
    | `WEBHOOK_SECRET` | (опционально) секрет для заголовка `X-Telegram-Bot-Api-Secret-Token` |
 
-   **Важно:** `WEBHOOK_BASE_URL` должен совпадать с URL, который даёт Render (указан в карточке сервиса). После первого деплоя скопируй URL и добавь его в Environment, затем **Manual Deploy**.
-5. **Create Web Service**. После деплоя в логах будет: `Webhook установлен: https://.../webhook`.
+   **Важно:** `WEBHOOK_BASE_URL` должен совпадать с URL сервиса в Render (указан в карточке сервиса). После первого деплоя скопируй URL и добавь в Environment, затем **Manual Deploy**.
+5. **Create Web Service**. В логах будет: `Webhook установлен: https://.../webhook`.
 
 ### 3. Проверка
 
@@ -309,7 +309,7 @@ python bot.py
 
 ### Локальный запуск (polling)
 
-Без webhook, для разработки:
+Для разработки без webhook:
 
 ```bash
 # В .env не задавай WEBHOOK_BASE_URL
@@ -319,7 +319,7 @@ python bot.py
 ### Важно
 
 - Запускай только **один** инстанс бота с одним `BOT_TOKEN` (webhook или polling).
-- Не запускай локально `python bot.py` с тем же токеном, что и на Render — иначе обновления будут уходить только в один из них.
+- Не запускай локально `python bot.py` с тем же токеном, что и на Render — обновления уйдут только в один из них.
 
 ---
 
