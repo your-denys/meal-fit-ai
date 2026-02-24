@@ -4,6 +4,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from database import add_meal, get_user, get_daily_totals
 from gemini_helper import analyze_food_photo, analyze_food_text, get_daily_tip
+from reminders import check_goal_reached_and_send
 from keyboards import main_keyboard, confirm_food_keyboard
 from calculator import format_daily_summary
 
@@ -191,6 +192,7 @@ async def food_confirmed(callback: CallbackQuery, state: FSMContext):
             text += f"\n\n💡 {tip}"
         await callback.message.answer(text, parse_mode="HTML")
 
+    await check_goal_reached_and_send(user_id, callback.bot)
     await callback.answer()
 
 @router.callback_query(F.data == "food_edit", FoodState.waiting_confirm)

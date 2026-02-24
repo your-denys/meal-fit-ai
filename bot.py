@@ -5,7 +5,7 @@ import asyncpg
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from config import BOT_TOKEN, GEMINI_API_KEY, DATABASE_URL
-from database import init_db, set_pool
+from database import init_db, set_pool, update_last_activity
 from handlers import common, food, stats, profile, quick
 from reminders import reminder_loop
 
@@ -41,6 +41,22 @@ async def log_updates_middleware(handler, event, data):
         log_updates.info("→ callback от %s: %s", cq.from_user.id, cq.data)
     return await handler(event, data)
 
+
+async def activity_middleware(handler, event, data):
+    """Обновить last_activity_at при любом действии пользователя (сообщение или кнопка)."""
+    update = event
+    user_id = None
+    if getattr(update, "message", None) and update.message.from_user:
+        user_id = update.message.from_user.id
+    elif getattr(update, "callback_query", None) and update.callback_query.from_user:
+        user_id = update.callback_query.from_user.id
+    if user_id:
+        try:
+            await update_last_activity(user_id)
+        except Exception as e:
+            log_updates.debug("update_last_activity: %s", e)
+    return await handler(event, data)
+
 async def setup_bot_dp():
     """Создать пул БД, бота и диспетчер с роутерами. Используется и для polling, и для webhook."""
     check_config()
@@ -51,6 +67,7 @@ async def setup_bot_dp():
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher(storage=MemoryStorage())
     dp.update.outer_middleware(log_updates_middleware)
+    dp.update.outer_middleware(activity_middleware)
 
     dp.include_router(common.router)
     dp.include_router(profile.router)

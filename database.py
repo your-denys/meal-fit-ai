@@ -50,6 +50,19 @@ async def init_db(pool: asyncpg.Pool | None = None):
                 await conn.execute(f"ALTER TABLE users ADD COLUMN {col} {typ}")
             except asyncpg.exceptions.DuplicateColumnError:
                 pass
+        try:
+            await conn.execute("ALTER TABLE users ADD COLUMN last_activity_at TIMESTAMP")
+        except asyncpg.exceptions.DuplicateColumnError:
+            pass
+        for col, typ in [("reengage_enabled", "INTEGER DEFAULT 1"), ("progress_notifications_enabled", "INTEGER DEFAULT 1")]:
+            try:
+                await conn.execute(f"ALTER TABLE users ADD COLUMN {col} {typ}")
+            except asyncpg.exceptions.DuplicateColumnError:
+                pass
+        try:
+            await conn.execute("ALTER TABLE users ADD COLUMN week_status_enabled INTEGER DEFAULT 1")
+        except asyncpg.exceptions.DuplicateColumnError:
+            pass
 
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS reminder_log (
@@ -91,6 +104,18 @@ async def init_db(pool: asyncpg.Pool | None = None):
                 carbs REAL
             )
         """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS notification_sent (
+                user_id BIGINT NOT NULL,
+                sent_date DATE NOT NULL,
+                notification_type VARCHAR(50) NOT NULL,
+                PRIMARY KEY (user_id, sent_date, notification_type)
+            )
+        """)
+        try:
+            await conn.execute("ALTER TABLE notification_sent ADD COLUMN sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+        except asyncpg.exceptions.DuplicateColumnError:
+            pass
 
 
 # --- Users ---
@@ -98,7 +123,8 @@ async def init_db(pool: asyncpg.Pool | None = None):
 USER_KEYS = [
     "user_id", "name", "weight", "height", "age", "gender", "activity", "goal",
     "target_weight", "calories_goal", "protein_goal", "fat_goal", "carbs_goal", "water_goal", "pace",
-    "reminders_enabled", "reminders_per_day", "username", "created_at"
+    "reminders_enabled", "reminders_per_day", "username", "created_at", "last_activity_at",
+    "reengage_enabled", "progress_notifications_enabled", "week_status_enabled"
 ]
 
 
@@ -132,6 +158,16 @@ async def get_users_for_reminders():
     async with p.acquire() as conn:
         rows = await conn.fetch(
             "SELECT user_id FROM users WHERE (reminders_enabled IS NULL OR reminders_enabled = 1) AND calories_goal IS NOT NULL AND calories_goal > 0"
+        )
+    return [r["user_id"] for r in rows]
+
+
+async def get_users_for_reengage():
+    """Пользователи, которым можно слать напоминания «вернись в бота» (48ч / 4–5 дней)."""
+    p = _get_pool()
+    async with p.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT user_id FROM users WHERE (reengage_enabled IS NULL OR reengage_enabled = 1) AND calories_goal IS NOT NULL AND calories_goal > 0"
         )
     return [r["user_id"] for r in rows]
 
@@ -252,6 +288,14 @@ async def get_meals_range(user_id: int, from_date: date, to_date: date):
     return [(r["d"], r["cal"] or 0, r["prot"] or 0, r["fat"] or 0, r["carb"] or 0) for r in rows]
 
 
+async def get_first_meal_date(user_id: int) -> date | None:
+    """Дата первого приёма пищи (для расчёта «всего дней в системе» и серий)."""
+    p = _get_pool()
+    async with p.acquire() as conn:
+        row = await conn.fetchval("SELECT MIN(date) FROM meals WHERE user_id = $1", user_id)
+    return row
+
+
 # --- Weight ---
 
 async def log_weight(user_id: int, weight: float):
@@ -294,3 +338,72 @@ async def delete_quick_food(food_id: int, user_id: int):
     p = _get_pool()
     async with p.acquire() as conn:
         await conn.execute("DELETE FROM quick_foods WHERE id = $1 AND user_id = $2", food_id, user_id)
+
+
+# --- Notification sent (цели достигнуты, 5-дневные серии) ---
+
+async def log_notification_sent(user_id: int, sent_date: date, notification_type: str):
+    p = _get_pool()
+    async with p.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO notification_sent (user_id, sent_date, notification_type) VALUES ($1, $2, $3) ON CONFLICT (user_id, sent_date, notification_type) DO NOTHING",
+            user_id, sent_date, notification_type
+        )
+
+
+async def was_notification_sent(user_id: int, sent_date: date, notification_type: str) -> bool:
+    p = _get_pool()
+    async with p.acquire() as conn:
+        row = await conn.fetchval(
+            "SELECT 1 FROM notification_sent WHERE user_id = $1 AND sent_date = $2 AND notification_type = $3",
+            user_id, sent_date, notification_type
+        )
+    return row is not None
+
+
+async def get_last_streak_notification_date(user_id: int, notification_type: str) -> date | None:
+    """Дата последней отправки уведомления о 5-дневной серии (protein_shortfall / fat_over / cal_over)."""
+    p = _get_pool()
+    async with p.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT sent_date FROM notification_sent WHERE user_id = $1 AND notification_type = $2 ORDER BY sent_date DESC LIMIT 1",
+            user_id, notification_type
+        )
+    return row["sent_date"] if row else None
+
+
+async def update_last_activity(user_id: int):
+    """Обновить время последней активности пользователя (сообщение или нажатие кнопки)."""
+    p = _get_pool()
+    now = datetime.now()
+    async with p.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET last_activity_at = $1 WHERE user_id = $2",
+            now, user_id
+        )
+
+
+async def get_last_reengage_sent_at(user_id: int, notification_type: str) -> datetime | None:
+    """Время последней отправки reengage-напоминания (reengage_48h / reengage_5d)."""
+    p = _get_pool()
+    async with p.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT sent_at FROM notification_sent WHERE user_id = $1 AND notification_type = $2 ORDER BY sent_at DESC LIMIT 1",
+            user_id, notification_type
+        )
+    if not row or not row.get("sent_at"):
+        return None
+    ts = row["sent_at"]
+    return ts.replace(tzinfo=None) if getattr(ts, "tzinfo", None) else ts
+
+
+async def log_reengage_sent(user_id: int, notification_type: str):
+    """Записать отправку reengage-напоминания (с sent_at для проверки интервала)."""
+    p = _get_pool()
+    now = datetime.now()
+    today = now.date()
+    async with p.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO notification_sent (user_id, sent_date, notification_type, sent_at) VALUES ($1, $2, $3, $4) ON CONFLICT (user_id, sent_date, notification_type) DO UPDATE SET sent_at = $4",
+            user_id, today, notification_type, now
+        )

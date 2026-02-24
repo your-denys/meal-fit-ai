@@ -4,6 +4,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from datetime import datetime
 from database import get_user, save_user, log_weight
 from keyboards import main_keyboard, gender_keyboard
 from gemini_helper import calculate_goals_ai
@@ -125,7 +126,7 @@ async def profile_button(message: Message, state: FSMContext):
         activity_label = ACTIVITY_LABELS.get(user.get("activity", ""), "—")
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✏️ Изменить цели КБЖУ", callback_data="profile_edit_kbju")],
-            [InlineKeyboardButton(text="🔔 Напоминания «пора поесть»", callback_data="profile_reminders")],
+            [InlineKeyboardButton(text="🎛 Центр управления", callback_data="profile_control_center")],
         ])
         await message.answer(
             f"👤 <b>Твой профиль:</b>\n\n"
@@ -146,6 +147,71 @@ async def profile_button(message: Message, state: FSMContext):
             reply_markup=kb
         )
 
+
+def _profile_text_and_kb(user: dict):
+    """Текст и клавиатура блока «Мой профиль» для повторного показа (например, из «Назад»)."""
+    goal_label = GOAL_LABELS.get(user.get("goal", ""), user.get("goal", "—"))
+    activity_label = ACTIVITY_LABELS.get(user.get("activity", ""), "—")
+    text = (
+        f"👤 <b>Твой профиль:</b>\n\n"
+        f"⚖️ Вес: {user.get('weight', '—')} кг\n"
+        f"📏 Рост: {user.get('height', '—')} см\n"
+        f"🎂 Возраст: {user.get('age', '—')} лет\n"
+        f"🎯 Цель: {goal_label}\n"
+        f"🏃 Активность: {activity_label}\n"
+        f"🏁 Желаемый вес: {user.get('target_weight', '—')} кг\n\n"
+        f"<b>Ежедневные цели:</b>\n"
+        f"🔥 {user.get('calories_goal', '?')} ккал\n"
+        f"🥩 Белки: {user.get('protein_goal', '?')} г\n"
+        f"🧈 Жиры: {user.get('fat_goal', '?')} г\n"
+        f"🍞 Углеводы: {user.get('carbs_goal', '?')} г\n"
+        f"💧 Вода: {user.get('water_goal') or '—'} мл\n\n"
+        f"Чтобы обновить данные профиля — /setup"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✏️ Изменить цели КБЖУ", callback_data="profile_edit_kbju")],
+        [InlineKeyboardButton(text="🎛 Центр управления", callback_data="profile_control_center")],
+    ])
+    return text, kb
+
+
+def control_center_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔔 Напоминания «пора поесть»", callback_data="profile_reminders")],
+        [InlineKeyboardButton(text="👋 Напоминания о трекинге", callback_data="profile_reengage")],
+        [InlineKeyboardButton(text="🎯 О прогрессе", callback_data="profile_progress")],
+        [InlineKeyboardButton(text="📊 Статус недели", callback_data="profile_week_status")],
+        [InlineKeyboardButton(text="◀️ Назад в профиль", callback_data="profile_back_to_profile")],
+    ])
+
+
+@router.callback_query(F.data == "profile_control_center")
+async def profile_control_center_screen(callback: CallbackQuery):
+    user = await get_user(callback.from_user.id)
+    if not user:
+        await callback.answer("Сначала заполни профиль.")
+        return
+    await callback.answer()
+    await callback.message.edit_text(
+        "🎛 <b>Центр управления</b>\n\n"
+        "Здесь можно включить или выключить разные уведомления:",
+        parse_mode="HTML",
+        reply_markup=control_center_keyboard()
+    )
+
+
+@router.callback_query(F.data == "profile_back_to_profile")
+async def profile_back_to_profile(callback: CallbackQuery):
+    user = await get_user(callback.from_user.id)
+    if not user:
+        await callback.answer()
+        return
+    text, kb = _profile_text_and_kb(user)
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    await callback.answer()
+
+
+# --- Напоминания «пора поесть» ---
 KBJU_FIELDS = {
     "cal": ("calories_goal", "🔥 Калории (ккал)", 500, 5000),
     "prot": ("protein_goal", "🥩 Белки (г)", 20, 300),
@@ -263,7 +329,8 @@ def reminders_keyboard(user: dict):
         InlineKeyboardButton(text="3 в день" + (" ✓" if per_day == 3 else ""), callback_data="profile_reminders_3"),
         InlineKeyboardButton(text="4 в день" + (" ✓" if per_day == 4 else ""), callback_data="profile_reminders_4"),
     ]
-    return InlineKeyboardMarkup(inline_keyboard=[row1, row2])
+    row3 = [InlineKeyboardButton(text="◀️ В центр управления", callback_data="profile_control_center")]
+    return InlineKeyboardMarkup(inline_keyboard=[row1, row2, row3])
 
 
 @router.callback_query(F.data == "profile_reminders")
@@ -314,6 +381,152 @@ async def profile_reminders_toggle(callback: CallbackQuery):
         f"Включи/выключи и выбери количество в день:"
     )
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=reminders_keyboard(user))
+
+
+def reengage_keyboard(user: dict):
+    enabled = user.get("reengage_enabled") is None or user.get("reengage_enabled") != 0
+    row1 = [InlineKeyboardButton(text="🔕 Выключить", callback_data="profile_reengage_off")] if enabled else [InlineKeyboardButton(text="🔔 Включить", callback_data="profile_reengage_on")]
+    row2 = [InlineKeyboardButton(text="◀️ В центр управления", callback_data="profile_control_center")]
+    return InlineKeyboardMarkup(inline_keyboard=[row1, row2])
+
+
+@router.callback_query(F.data == "profile_reengage")
+async def profile_reengage_screen(callback: CallbackQuery):
+    user = await get_user(callback.from_user.id)
+    if not user:
+        await callback.answer("Сначала заполни профиль.")
+        return
+    await callback.answer()
+    enabled = user.get("reengage_enabled") is None or user.get("reengage_enabled") != 0
+    status = "включены" if enabled else "выключены"
+    text = (
+        "👋 <b>Напоминания о трекинге</b>\n\n"
+        "Если ты долго не открываешь бота, мы пришлём мягкое напоминание:\n"
+        "• через 2 дня — «Я тебя потерял 👀 Продолжаем следить за прогрессом?»\n"
+        "• через 4–5 дней — короткий мотивирующий текст.\n\n"
+        f"Сейчас: <b>{status}</b>."
+    )
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=reengage_keyboard(user))
+
+
+@router.callback_query(F.data.startswith("profile_reengage_"))
+async def profile_reengage_toggle(callback: CallbackQuery):
+    action = callback.data.replace("profile_reengage_", "")
+    user = await get_user(callback.from_user.id)
+    if not user:
+        await callback.answer()
+        return
+    updates = {k: user[k] for k in user if k != "user_id"}
+    updates["username"] = callback.from_user.username
+    updates["reengage_enabled"] = 1 if action == "on" else 0
+    await save_user(callback.from_user.id, updates)
+    await callback.answer("Сохранено")
+    user = await get_user(callback.from_user.id)
+    enabled = user.get("reengage_enabled") is None or user.get("reengage_enabled") != 0
+    status = "включены" if enabled else "выключены"
+    text = (
+        "👋 <b>Напоминания о трекинге</b>\n\n"
+        "Если ты долго не открываешь бота, мы пришлём мягкое напоминание.\n\n"
+        f"Сейчас: <b>{status}</b>."
+    )
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=reengage_keyboard(user))
+
+
+def progress_keyboard(user: dict):
+    enabled = user.get("progress_notifications_enabled") is None or user.get("progress_notifications_enabled") != 0
+    row1 = [InlineKeyboardButton(text="🔕 Выключить", callback_data="profile_progress_off")] if enabled else [InlineKeyboardButton(text="🔔 Включить", callback_data="profile_progress_on")]
+    row2 = [InlineKeyboardButton(text="◀️ В центр управления", callback_data="profile_control_center")]
+    return InlineKeyboardMarkup(inline_keyboard=[row1, row2])
+
+
+@router.callback_query(F.data == "profile_progress")
+async def profile_progress_screen(callback: CallbackQuery):
+    user = await get_user(callback.from_user.id)
+    if not user:
+        await callback.answer("Сначала заполни профиль.")
+        return
+    await callback.answer()
+    enabled = user.get("progress_notifications_enabled") is None or user.get("progress_notifications_enabled") != 0
+    status = "включены" if enabled else "выключены"
+    text = (
+        "🎯 <b>О прогрессе</b>\n\n"
+        "Уведомления о достижении целей и поддержке:\n"
+        "• когда ты выполнил норму белка или калорий за день — поздравление и мотивация;\n"
+        "• если 5 дней подряд недобор белка или перебор калорий — мягкий совет.\n\n"
+        f"Сейчас: <b>{status}</b>."
+    )
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=progress_keyboard(user))
+
+
+@router.callback_query(F.data.startswith("profile_progress_"))
+async def profile_progress_toggle(callback: CallbackQuery):
+    action = callback.data.replace("profile_progress_", "")
+    user = await get_user(callback.from_user.id)
+    if not user:
+        await callback.answer()
+        return
+    updates = {k: user[k] for k in user if k != "user_id"}
+    updates["username"] = callback.from_user.username
+    updates["progress_notifications_enabled"] = 1 if action == "on" else 0
+    await save_user(callback.from_user.id, updates)
+    await callback.answer("Сохранено")
+    user = await get_user(callback.from_user.id)
+    enabled = user.get("progress_notifications_enabled") is None or user.get("progress_notifications_enabled") != 0
+    status = "включены" if enabled else "выключены"
+    text = (
+        "🎯 <b>О прогрессе</b>\n\n"
+        "Уведомления о достижении целей и поддержке.\n\n"
+        f"Сейчас: <b>{status}</b>."
+    )
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=progress_keyboard(user))
+
+
+def week_status_keyboard(user: dict):
+    enabled = user.get("week_status_enabled") is None or user.get("week_status_enabled") != 0
+    row1 = [InlineKeyboardButton(text="🔕 Выключить", callback_data="profile_week_status_off")] if enabled else [InlineKeyboardButton(text="🔔 Включить", callback_data="profile_week_status_on")]
+    row2 = [InlineKeyboardButton(text="◀️ В центр управления", callback_data="profile_control_center")]
+    return InlineKeyboardMarkup(inline_keyboard=[row1, row2])
+
+
+@router.callback_query(F.data == "profile_week_status")
+async def profile_week_status_screen(callback: CallbackQuery):
+    user = await get_user(callback.from_user.id)
+    if not user:
+        await callback.answer("Сначала заполни профиль.")
+        return
+    await callback.answer()
+    enabled = user.get("week_status_enabled") is None or user.get("week_status_enabled") != 0
+    status = "включён" if enabled else "выключен"
+    text = (
+        "📊 <b>Статус недели</b>\n\n"
+        "Раз в 7 дней (в 19:00) приходит отчёт по неделе: баланс, перегруз или слишком высокий дефицит, "
+        "индекс недели 0–100% и короткая рекомендация. Отправляется только если в неделе было не менее 3 дней с данными.\n\n"
+        f"Сейчас: <b>{status}</b>."
+    )
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=week_status_keyboard(user))
+
+
+@router.callback_query(F.data.startswith("profile_week_status_"))
+async def profile_week_status_toggle(callback: CallbackQuery):
+    action = callback.data.replace("profile_week_status_", "")
+    user = await get_user(callback.from_user.id)
+    if not user:
+        await callback.answer()
+        return
+    updates = {k: user[k] for k in user if k != "user_id"}
+    updates["username"] = callback.from_user.username
+    updates["week_status_enabled"] = 1 if action == "on" else 0
+    await save_user(callback.from_user.id, updates)
+    await callback.answer("Сохранено")
+    user = await get_user(callback.from_user.id)
+    enabled = user.get("week_status_enabled") is None or user.get("week_status_enabled") != 0
+    status = "включён" if enabled else "выключен"
+    text = (
+        "📊 <b>Статус недели</b>\n\n"
+        "Раз в 7 дней приходит отчёт по неделе с рекомендацией.\n\n"
+        f"Сейчас: <b>{status}</b>."
+    )
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=week_status_keyboard(user))
 
 
 @router.message(Command("setup"))
@@ -534,6 +747,7 @@ async def get_target_weight(message: Message, state: FSMContext):
             "carbs_goal": carbs,
             "water_goal": water,
             "username": message.from_user.username,
+            "last_activity_at": datetime.now(),
         }
         await save_user(message.from_user.id, user_data)
         await state.clear()

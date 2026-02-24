@@ -2,7 +2,7 @@ import io
 from datetime import date, timedelta
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, BufferedInputFile
-from database import get_daily_totals, get_meals_range, get_weight_history, get_user
+from database import get_daily_totals, get_meals_range, get_weight_history, get_user, get_first_meal_date
 from keyboards import stats_keyboard
 from calculator import format_daily_summary
 
@@ -80,6 +80,134 @@ def _format_date_short(d: str) -> str:
     if len(d) >= 10:
         return f"{d[8:10]}.{d[5:7]}"
     return d
+
+
+def _compute_streaks(rows: list, cal_goal: int, prot_goal: float, fat_goal: float, today_str: str) -> dict:
+    """
+    rows: список (date_str, cal, prot, fat, carb) по дням с данными, отсортирован по дате по возрастанию.
+    Возвращает текущие серии, рекорды и общую статистику.
+    """
+    if not rows:
+        return {
+            "current_protein": 0, "current_fat": 0, "current_cal": 0,
+            "best_protein": 0, "best_fat": 0, "best_cal": 0,
+            "total_days": 0, "days_protein_met": 0, "days_fat_ok": 0, "days_cal_ok": 0,
+        }
+    # Допуск: жиры не перебор до 110%, калории в коридоре 90–110%
+    def protein_ok(prot):
+        return (prot_goal or 0) > 0 and prot >= (prot_goal or 0)
+    def fat_ok(fat):
+        return (fat_goal or 0) <= 0 or fat <= (fat_goal or 0) * 1.10
+    def cal_ok(cal):
+        return (cal_goal or 0) > 0 and 0.90 * (cal_goal or 0) <= cal <= 1.10 * (cal_goal or 0)
+
+    ok_protein = [protein_ok(r[2]) for r in rows]
+    ok_fat = [fat_ok(r[3]) for r in rows]
+    ok_cal = [cal_ok(r[1]) for r in rows]
+    dates = [r[0] for r in rows]
+
+    def current_streak(ok_list):
+        if not dates or dates[-1] != today_str:
+            return 0
+        c = 0
+        for i in range(len(ok_list) - 1, -1, -1):
+            if not ok_list[i]:
+                break
+            c += 1
+        return c
+
+    def best_streak(ok_list):
+        best = 0
+        cur = 0
+        for v in ok_list:
+            if v:
+                cur += 1
+                best = max(best, cur)
+            else:
+                cur = 0
+        return best
+
+    return {
+        "current_protein": current_streak(ok_protein),
+        "current_fat": current_streak(ok_fat),
+        "current_cal": current_streak(ok_cal),
+        "best_protein": best_streak(ok_protein),
+        "best_fat": best_streak(ok_fat),
+        "best_cal": best_streak(ok_cal),
+        "total_days": len(rows),
+        "days_protein_met": sum(ok_protein),
+        "days_fat_ok": sum(ok_fat),
+        "days_cal_ok": sum(ok_cal),
+    }
+
+
+@router.message(F.text == "🏆 Результаты")
+async def results_screen(message: Message):
+    """Экран «Результаты»: текущие серии → рекорды → общая статистика."""
+    user_id = message.from_user.id
+    user = await get_user(user_id)
+    first_date = await get_first_meal_date(user_id)
+    today = date.today()
+    today_str = today.isoformat()
+
+    if not first_date:
+        await message.answer(
+            "🏆 <b>Результаты</b>\n\n"
+            "Пока нет данных. Добавляй приёмы пищи — здесь появятся серии и рекорды.",
+            parse_mode="HTML"
+        )
+        return
+
+    from_date = first_date
+    to_date = today
+    rows = await get_meals_range(user_id, from_date, to_date)
+    if not rows:
+        await message.answer(
+            "🏆 <b>Результаты</b>\n\n"
+            "Пока нет данных. Добавляй приёмы пищи — здесь появятся серии и рекорды.",
+            parse_mode="HTML"
+        )
+        return
+
+    cal_goal = (user.get("calories_goal") or 0) if user else 0
+    prot_goal = float(user.get("protein_goal") or 0) if user else 0
+    fat_goal = float(user.get("fat_goal") or 0) if user else 0
+    data = _compute_streaks(rows, cal_goal, prot_goal, fat_goal, today_str)
+
+    # 1) Текущая серия (если есть цели)
+    lines = ["🏆 <b>Результаты</b>\n", "🔥 <b>Текущая серия</b>"]
+    if cal_goal or prot_goal or fat_goal:
+        if data["current_protein"] > 0:
+            lines.append(f"🟢 Закрыл норму белка — <b>{data['current_protein']} дн.</b> подряд")
+        else:
+            lines.append("🥩 Белок — пока нет серии")
+        if fat_goal > 0:
+            if data["current_fat"] > 0:
+                lines.append(f"🟢 Не перебор жиров — <b>{data['current_fat']} дн.</b> подряд")
+            else:
+                lines.append("🧈 Жиры — пока нет серии")
+        if cal_goal > 0:
+            if data["current_cal"] > 0:
+                lines.append(f"🟢 Попадание в калории — <b>{data['current_cal']} дн.</b> подряд")
+            else:
+                lines.append("🔥 Калории — пока нет серии")
+    else:
+        lines.append("Заполни цели в профиле — появятся серии по белку, жирам и калориям.")
+
+    # 2) Рекорды
+    lines.append("\n🏆 <b>Рекорды</b>")
+    lines.append(f"🥩 Лучшая серия по белку — <b>{data['best_protein']} дн.</b>")
+    lines.append(f"🧈 Лучший результат по жирам — <b>{data['best_fat']} дн.</b>")
+    lines.append(f"🔥 Рекорд соблюдения калорий — <b>{data['best_cal']} дн.</b>")
+
+    # 3) Общая статистика
+    lines.append("\n📊 <b>Всего</b>")
+    lines.append(f"Дней в системе: <b>{data['total_days']}</b>")
+    lines.append(f"Белок закрыт: <b>{data['days_protein_met']}</b> дн.")
+    lines.append(f"Жиры в норме: <b>{data['days_fat_ok']}</b> дн.")
+    lines.append(f"Калории в норме: <b>{data['days_cal_ok']}</b> дн.")
+
+    await message.answer("\n".join(lines), parse_mode="HTML")
 
 
 @router.message(F.text == "📊 Статистика")
