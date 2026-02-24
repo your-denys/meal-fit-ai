@@ -23,7 +23,7 @@ PORT = int(os.environ.get("PORT", 8080))
 
 async def health(request: web.Request) -> web.Response:
     """GET / — для проверки, что сервис жив (Render, браузер)."""
-    return web.Response(text="FitMeal AI bot is alive!", content_type="text/plain; charset=utf-8")
+    return web.Response(text="FitMeal AI bot is alive!", content_type="text/plain")
 
 
 async def create_app() -> web.Application:
