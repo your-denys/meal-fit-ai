@@ -126,6 +126,7 @@ async def profile_button(message: Message, state: FSMContext):
         activity_label = ACTIVITY_LABELS.get(user.get("activity", ""), "—")
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✏️ Изменить цели КБЖУ", callback_data="profile_edit_kbju")],
+            [InlineKeyboardButton(text="📊 Статистика", callback_data="stats_open")],
             [InlineKeyboardButton(text="🎛 Центр управления", callback_data="profile_control_center")],
         ])
         await message.answer(
@@ -170,6 +171,7 @@ def _profile_text_and_kb(user: dict):
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✏️ Изменить цели КБЖУ", callback_data="profile_edit_kbju")],
+        [InlineKeyboardButton(text="📊 Статистика", callback_data="stats_open")],
         [InlineKeyboardButton(text="🎛 Центр управления", callback_data="profile_control_center")],
     ])
     return text, kb

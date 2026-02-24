@@ -1,7 +1,7 @@
 import io
 from datetime import date, timedelta
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, BufferedInputFile
+from aiogram.types import Message, CallbackQuery
 from database import get_daily_totals, get_meals_range, get_weight_history, get_user, get_first_meal_date
 from keyboards import stats_keyboard
 from calculator import format_daily_summary
@@ -42,37 +42,6 @@ def make_nutrition_chart(rows, title="Калории по дням"):
         return buf.read()
     except Exception as e:
         print(f"Chart error: {e}")
-        return None
-
-def make_weight_chart(rows):
-    try:
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-
-        rows = list(reversed(rows))
-        dates = [r[1][5:] for r in rows]
-        weights = [r[0] for r in rows]
-
-        fig, ax = plt.subplots(figsize=(10, 4), facecolor="#1a1a2e")
-        ax.set_facecolor("#16213e")
-        ax.tick_params(colors="white")
-        ax.spines[:].set_color("#444")
-
-        ax.plot(dates, weights, color="#e94560", marker="o", linewidth=2, markersize=5)
-        ax.fill_between(range(len(dates)), weights, alpha=0.15, color="#e94560")
-        ax.set_title("⚖️ Динамика веса", color="white", fontsize=13)
-        ax.set_ylabel("кг", color="white")
-        plt.xticks(rotation=45, ha="right")
-        plt.tight_layout()
-
-        buf = io.BytesIO()
-        plt.savefig(buf, format="png", dpi=120, bbox_inches="tight")
-        buf.seek(0)
-        plt.close()
-        return buf.read()
-    except Exception as e:
-        print(f"Weight chart error: {e}")
         return None
 
 def _format_date_short(d: str) -> str:
@@ -210,6 +179,30 @@ async def results_screen(message: Message):
     await message.answer("\n".join(lines), parse_mode="HTML")
 
 
+@router.callback_query(F.data == "stats_open")
+async def stats_open_from_profile(callback: CallbackQuery):
+    """Открыть блок «Статистика» из профиля (кнопка «📊 Статистика»)."""
+    user_id = callback.from_user.id
+    user = await get_user(user_id)
+    totals = await get_daily_totals(user_id)
+    if user:
+        text = format_daily_summary(totals, user)
+    else:
+        text = (
+            f"📊 <b>Сегодня:</b>\n\n"
+            f"🔥 {totals['calories']} ккал\n"
+            f"🥩 Белки: {totals['protein']:.1f} г\n"
+            f"🧈 Жиры: {totals['fat']:.1f} г\n"
+            f"🍞 Углеводы: {totals['carbs']:.1f} г"
+        )
+    await callback.message.answer(
+        f"📊 <b>Статистика</b>\n\n{text}\n\nВыбери период:",
+        parse_mode="HTML",
+        reply_markup=stats_keyboard()
+    )
+    await callback.answer()
+
+
 @router.message(F.text == "📊 Статистика")
 async def stats_menu(message: Message):
     """По умолчанию показываем за сегодня, ниже кнопки Неделя / Месяц."""
@@ -278,25 +271,22 @@ async def stats_month(callback: CallbackQuery):
 
 @router.callback_query(F.data == "stats_weight")
 async def stats_weight(callback: CallbackQuery):
+    """Список записей веса (последние 30)."""
     user_id = callback.from_user.id
     rows = await get_weight_history(user_id, 30)
 
-    if not rows or len(rows) < 2:
-        await callback.message.answer("Нужно хотя бы 2 записи веса для графика. Записывай вес регулярно!")
+    if not rows:
+        await callback.message.answer("Пока нет записей веса. Используй «⚖️ Записать вес».")
         await callback.answer()
         return
 
-    chart = make_weight_chart(rows)
     user = await get_user(user_id)
-    caption = "⚖️ <b>Динамика веса</b>"
+    lines = ["⚖️ <b>Список веса</b>\n"]
+    for w, d in rows:
+        date_short = d[8:10] + "." + d[5:7] + "." + d[0:4] if len(d) >= 10 else d
+        lines.append(f"• {date_short} — <b>{w} кг</b>")
     if user and user.get("target_weight"):
         diff = user["weight"] - user["target_weight"]
-        caption += f"\nОсталось до цели: {abs(diff):.1f} кг"
-
-    if chart:
-        await callback.message.answer_photo(
-            BufferedInputFile(chart, filename="weight.png"),
-            caption=caption,
-            parse_mode="HTML"
-        )
+        lines.append(f"\n📍 До цели: {abs(diff):.1f} кг")
+    await callback.message.answer("\n".join(lines), parse_mode="HTML")
     await callback.answer()

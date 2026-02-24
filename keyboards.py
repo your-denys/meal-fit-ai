@@ -5,9 +5,8 @@ def main_keyboard():
         keyboard=[
             [KeyboardButton(text="📷 Добавить еду"), KeyboardButton(text="🍽 Сегодня")],
             [KeyboardButton(text="💡 Что съесть?"), KeyboardButton(text="⚡ Быстрое добавление")],
-            [KeyboardButton(text="👤 Мой профиль"), KeyboardButton(text="📊 Статистика")],
-            [KeyboardButton(text="⚖️ Записать вес"), KeyboardButton(text="🏆 Результаты")],
-            [KeyboardButton(text="📖 Что я умею")],
+            [KeyboardButton(text="👤 Мой профиль"), KeyboardButton(text="🏆 Результаты")],
+            [KeyboardButton(text="⚖️ Записать вес"), KeyboardButton(text="📖 Что я умею")],
         ],
         resize_keyboard=True
     )
@@ -36,13 +35,13 @@ def confirm_food_keyboard():
     ])
 
 def stats_keyboard():
-    """Клавиатура в разделе «📊 Статистика»: неделя, месяц, график веса."""
+    """Клавиатура в разделе «📊 Статистика»: неделя, месяц, список веса."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="📆 Неделя", callback_data="stats_week"),
             InlineKeyboardButton(text="🗓 Месяц", callback_data="stats_month"),
         ],
-        [InlineKeyboardButton(text="⚖️ График веса", callback_data="stats_weight")],
+        [InlineKeyboardButton(text="⚖️ Список веса", callback_data="stats_weight")],
     ])
 
 def quick_foods_keyboard(foods: list):
